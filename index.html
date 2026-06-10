@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fuel Monitoring Board</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">FB</div>
+      <div>
+        <h1>Fuel Monitoring Board</h1>
+        <p class="subtitle">Live fuel levels — sorted low to full</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span class="live-dot"></span>
+      <span id="last-sync">Last sync: just now</span>
+      <button id="refresh" class="btn">↻ Refresh</button>
+    </div>
+  </header>
+
+  <main>
+    <nav class="tabs">
+      <button class="tab active" data-view="board"><i class="ti"></i>Fuel board</button>
+      <button class="tab" data-view="coverage">Sensor coverage</button>
+    </nav>
+
+    <div id="view-board">
+    <section class="stats">
+      <div class="stat-card critical">
+        <span class="stat-label">Critical (&lt;25%)</span>
+        <span class="stat-value" id="stat-critical">0</span>
+      </div>
+      <div class="stat-card low">
+        <span class="stat-label">Low (25–50%)</span>
+        <span class="stat-value" id="stat-low">0</span>
+      </div>
+      <div class="stat-card mid">
+        <span class="stat-label">Mid (50–75%)</span>
+        <span class="stat-value" id="stat-mid">0</span>
+      </div>
+      <div class="stat-card full">
+        <span class="stat-label">Full (&gt;75%)</span>
+        <span class="stat-value" id="stat-full">0</span>
+      </div>
+      <div class="stat-card total">
+        <span class="stat-label">Total units</span>
+        <span class="stat-value" id="stat-total">0</span>
+      </div>
+      <div class="stat-card avg">
+        <span class="stat-label">Average fuel</span>
+        <span class="stat-value" id="stat-avg">0%</span>
+      </div>
+    </section>
+
+    <section class="controls">
+      <input type="text" id="search" placeholder="Search unit, driver or location..." />
+      <select id="filter-level">
+        <option value="">All fuel levels</option>
+        <option value="critical">Critical (&lt;25%)</option>
+        <option value="low">Low (25–50%)</option>
+        <option value="mid">Mid (50–75%)</option>
+        <option value="full">Full (&gt;75%)</option>
+      </select>
+      <select id="filter-status">
+        <option value="">All statuses</option>
+        <option value="Driving">Driving</option>
+        <option value="Idle">Idle</option>
+        <option value="Parked">Parked</option>
+        <option value="Off duty">Off duty</option>
+      </select>
+      <select id="sort-order">
+        <option value="asc">Fuel: Low → Full</option>
+        <option value="desc">Fuel: Full → Low</option>
+        <option value="updated">Recently updated</option>
+      </select>
+      <label class="toggle">
+        <input type="checkbox" id="show-nofuel" checked />
+        Show units without fuel sensor
+      </label>
+    </section>
+
+    <section class="board">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Unit</th>
+            <th>Driver</th>
+            <th>Current location</th>
+            <th>Fuel level</th>
+            <th>Fuel bar</th>
+            <th>Last update</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div id="empty" class="empty hidden">No units match your filters</div>
+    </section>
+
+    <section class="info-card">
+      <div class="info-icon">i</div>
+      <div>
+        <strong>Live Motive connection</strong>
+        <p>Fuel levels come from Motive <code>/v1/vehicle_locations</code> (<code>fuel_primary_remaining_percentage</code>), refreshed every 60s. Open this page at <code>http://localhost:3000</code> for live data — opening the file directly shows demo data. Units without an ELD fuel sensor appear as <code>No sensor</code>; hide them with the toggle above. Dispatch board integration comes next.</p>
+      </div>
+    </section>
+    </div>
+
+    <div id="view-coverage" class="hidden">
+      <section class="stats coverage-stats">
+        <div class="stat-card full">
+          <span class="stat-label">Live now</span>
+          <span class="stat-value" id="cov-reporting">0</span>
+        </div>
+        <div class="stat-card mid">
+          <span class="stat-label">Last known (parked)</span>
+          <span class="stat-value" id="cov-check">0</span>
+        </div>
+        <div class="stat-card critical">
+          <span class="stat-label">Never reported</span>
+          <span class="stat-value" id="cov-offline">0</span>
+        </div>
+        <div class="stat-card total">
+          <span class="stat-label">Coverage</span>
+          <span class="stat-value" id="cov-pct">0%</span>
+        </div>
+      </section>
+
+      <div class="cov-block">
+        <div class="cov-head">
+          <h2>Last known — parked, engine off</h2>
+          <button class="btn" id="copy-check">Copy list</button>
+        </div>
+        <p class="cov-note">A truck only streams fuel while its engine is on. These units are parked, so the board shows their <strong>last known</strong> fuel (just like the Motive dashboard) with the reading age. They flip back to <code>live</code> the moment they start driving — no action needed.</p>
+        <div class="cov-grid" id="cov-list-check"></div>
+      </div>
+
+      <div class="cov-block">
+        <div class="cov-head">
+          <h2>Never reported fuel yet</h2>
+          <button class="btn" id="copy-offline">Copy list</button>
+        </div>
+        <p class="cov-note">No fuel reading captured since the board started. This list shrinks as trucks drive and report for the first time. Units that stay here after a full day of driving are the genuinely sensor-less ones (often <code>#</code>-prefixed retired trucks) — those are worth checking in Motive.</p>
+        <div class="cov-grid" id="cov-list-offline"></div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <span>Fuel Monitoring Board · v0.1</span>
+    <span>Built for dispatch + fuel teams</span>
+  </footer>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

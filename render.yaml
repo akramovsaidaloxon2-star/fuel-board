@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: fuel-board
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    autoDeploy: true
+    envVars:
+      - key: MOTIVE_API_KEY
+        sync: false
+      - key: AUTH_USER
+        sync: false
+      - key: AUTH_PASS
+        sync: false

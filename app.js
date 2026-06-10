@@ -1,0 +1,218 @@
+const $ = (sel) => document.querySelector(sel);
+let fleet = [];
+let live = false;
+
+function fuelClass(p) {
+  if (p == null) return "none";
+  if (p < 25) return "critical";
+  if (p < 50) return "low";
+  if (p < 75) return "mid";
+  return "full";
+}
+
+function formatUpdated(mins) {
+  if (mins == null || mins >= 99999) return "—";
+  if (mins < 60) return mins + " min ago";
+  const h = Math.floor(mins / 60);
+  if (h < 24) return h + "h ago";
+  return Math.floor(h / 24) + "d ago";
+}
+
+function renderStats(rows) {
+  const fueled = rows.filter(r => r.fuel != null);
+  const total = rows.length;
+  const critical = fueled.filter(r => r.fuel < 25).length;
+  const low = fueled.filter(r => r.fuel >= 25 && r.fuel < 50).length;
+  const mid = fueled.filter(r => r.fuel >= 50 && r.fuel < 75).length;
+  const full = fueled.filter(r => r.fuel >= 75).length;
+  const avg = fueled.length ? Math.round(fueled.reduce((a, r) => a + r.fuel, 0) / fueled.length) : 0;
+
+  $("#stat-critical").textContent = critical;
+  $("#stat-low").textContent = low;
+  $("#stat-mid").textContent = mid;
+  $("#stat-full").textContent = full;
+  $("#stat-total").textContent = total;
+  $("#stat-avg").textContent = avg + "%";
+}
+
+function statusClass(s) {
+  return "status-" + s.split(" ")[0];
+}
+
+function render() {
+  const q = $("#search").value.toLowerCase().trim();
+  const lvl = $("#filter-level").value;
+  const st = $("#filter-status").value;
+  const order = $("#sort-order").value;
+  const showNoFuel = $("#show-nofuel") ? $("#show-nofuel").checked : true;
+
+  let rows = fleet.filter(r => {
+    if (!showNoFuel && r.fuel == null) return false;
+    if (lvl && fuelClass(r.fuel) !== lvl) return false;
+    if (st && r.status !== st) return false;
+    if (!q) return true;
+    return [r.unit, r.driver, r.location].some(v => String(v).toLowerCase().includes(q));
+  });
+
+  // Sorting. Null fuel always sinks to the bottom for fuel-based sorts.
+  const nullLast = (a, b, cmp) => {
+    if (a.fuel == null && b.fuel == null) return 0;
+    if (a.fuel == null) return 1;
+    if (b.fuel == null) return -1;
+    return cmp(a, b);
+  };
+  if (order === "asc") rows.sort((a, b) => nullLast(a, b, (x, y) => x.fuel - y.fuel));
+  else if (order === "desc") rows.sort((a, b) => nullLast(a, b, (x, y) => y.fuel - x.fuel));
+  else if (order === "updated") rows.sort((a, b) => a.updated - b.updated);
+
+  renderStats(rows);
+
+  const tbody = $("#rows");
+  const empty = $("#empty");
+  if (!rows.length) {
+    tbody.innerHTML = "";
+    empty.classList.remove("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+
+  tbody.innerHTML = rows.map((r, i) => {
+    const fc = fuelClass(r.fuel);
+    const hasFuel = r.fuel != null;
+    const gallons = hasFuel ? Math.round((r.fuel / 100) * r.tankGal) : null;
+    const stale = r.updated > 60;
+    const cached = r.fuelSource === "cached";
+    const fuelTag = r.fuelSource === "live"
+      ? `<span class="fuel-tag live">live</span>`
+      : cached ? `<span class="fuel-tag">last known · ${formatUpdated(r.fuelAgeMin)}</span>` : "";
+    const fuelCell = hasFuel
+      ? `<span class="fuel-pct ${fc}">${r.fuel}%</span> ${fuelTag}<div class="driver-meta">${gallons} / ${r.tankGal} gal</div>`
+      : `<span class="fuel-pct none">No data yet</span>`;
+    const barCell = hasFuel
+      ? `<div class="fuel-bar"><div class="fuel-fill ${fc}" style="width: ${r.fuel}%; opacity:${cached ? 0.5 : 1}"></div><span class="fuel-bar-label">${r.fuel}%</span></div>`
+      : `<div class="fuel-bar"><span class="fuel-bar-label" style="color:var(--text-mute)">—</span></div>`;
+    return `
+      <tr>
+        <td class="time-cell">${i + 1}</td>
+        <td><span class="unit-pill">${r.unit}</span>${r.vehicleInfo ? `<div class="driver-meta">${r.vehicleInfo}</div>` : ""}</td>
+        <td>
+          <div class="driver-name">${r.driver}</div>
+          <div class="driver-meta">${r.phone || ""}</div>
+        </td>
+        <td>
+          <div class="location">${r.location}</div>
+          <div class="location-meta">${r.state}</div>
+        </td>
+        <td>${fuelCell}</td>
+        <td>${barCell}</td>
+        <td class="time-cell ${stale ? "stale" : ""}">${formatUpdated(r.updated)}</td>
+        <td><span class="status-badge ${statusClass(r.status)}">${r.status}</span></td>
+        <td>
+          ${r.phone ? `<button class="action-btn" data-unit="${r.unit}" data-act="call">Call</button>` : ""}
+          <button class="action-btn" data-unit="${r.unit}" data-act="locate">Locate</button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+
+  tbody.querySelectorAll(".action-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const unit = btn.dataset.unit;
+      const act = btn.dataset.act;
+      const r = fleet.find(x => x.unit === unit);
+      if (act === "call") {
+        window.location.href = "tel:" + r.phone.replace(/[^0-9+]/g, "");
+      } else {
+        const q = (r.lat != null && r.lon != null) ? `${r.lat},${r.lon}` : encodeURIComponent(r.location);
+        window.open(`https://www.google.com/maps/search/?api=1&query=${q}`, "_blank");
+      }
+    });
+  });
+}
+
+function renderCoverage() {
+  const live = fleet.filter(r => r.fuelSource === "live");
+  const cached = fleet.filter(r => r.fuelSource === "cached");
+  const none = fleet.filter(r => r.fuelSource === "none");
+  const total = fleet.length || 1;
+  const covered = live.length + cached.length;
+
+  $("#cov-reporting").textContent = live.length;
+  $("#cov-check").textContent = cached.length;
+  $("#cov-offline").textContent = none.length;
+  $("#cov-pct").textContent = Math.round((covered / total) * 100) + "%";
+
+  const card = (r) => `
+    <div class="cov-item">
+      <span class="u">${r.unit}</span>
+      <span class="m">${r.vehicleInfo || "—"}</span>
+      <span class="a">${formatUpdated(r.updated)}${r.location && r.location !== "Unknown" ? " · " + r.location : ""}</span>
+    </div>`;
+
+  none.sort((a, b) => a.unit.localeCompare(b.unit));
+  $("#cov-list-check").innerHTML = cached.map(card).join("") || `<p class="cov-note">None yet — values fill in as trucks drive.</p>`;
+  $("#cov-list-offline").innerHTML = none.map(card).join("") || `<p class="cov-note">None 🎉 every unit has reported fuel at least once.</p>`;
+
+  $("#copy-check").onclick = () => copyUnits(cached, "Last known (parked)");
+  $("#copy-offline").onclick = () => copyUnits(none, "Never reported fuel");
+}
+
+function copyUnits(list, label) {
+  const text = `${label} (${list.length}):\n` + list.map(r => `${r.unit}\t${r.vehicleInfo || ""}`).join("\n");
+  navigator.clipboard.writeText(text).then(() => {
+    alert(`Copied ${list.length} units to clipboard`);
+  });
+}
+
+function setupTabs() {
+  document.querySelectorAll(".tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+      tab.classList.add("active");
+      const view = tab.dataset.view;
+      $("#view-board").classList.toggle("hidden", view !== "board");
+      $("#view-coverage").classList.toggle("hidden", view !== "coverage");
+      if (view === "coverage") renderCoverage();
+    });
+  });
+}
+
+function setSync(text, ok) {
+  const el = $("#last-sync");
+  el.textContent = text;
+  const dot = document.querySelector(".live-dot");
+  if (dot) dot.style.background = ok ? "#2bb673" : "#e24b4a";
+}
+
+async function loadData() {
+  setSync("Syncing…", true);
+  try {
+    const res = await fetch("/api/fuel", { cache: "no-store" });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || "API error");
+    fleet = json.fleet;
+    live = true;
+    const t = new Date(json.syncedAt);
+    const c = json.counts;
+    setSync(`${c.live} live · ${c.cached} last-known · ${c.withFuel}/${c.total} units · ${t.toLocaleTimeString()}`, true);
+  } catch (e) {
+    // Fallback to mock data (when opened as a plain file, no backend)
+    fleet = (window.MOCK_FLEET || []).map(x => ({ ...x, vehicleInfo: "", lat: null, lon: null, ecm: true }));
+    live = false;
+    setSync("Demo data (backend offline)", false);
+  }
+  render();
+  if (!$("#view-coverage").classList.contains("hidden")) renderCoverage();
+}
+
+$("#search").addEventListener("input", render);
+$("#filter-level").addEventListener("change", render);
+$("#filter-status").addEventListener("change", render);
+$("#sort-order").addEventListener("change", render);
+const noFuelToggle = $("#show-nofuel");
+if (noFuelToggle) noFuelToggle.addEventListener("change", render);
+$("#refresh").addEventListener("click", loadData);
+
+setupTabs();
+loadData();
+setInterval(loadData, 60000);
