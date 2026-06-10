@@ -233,6 +233,20 @@ tbody tr:hover td { background: var(--row-hover); }
 .idle.mid { color: var(--mid); }
 .idle.high { color: var(--critical); }
 
+.idle-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.idle-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-mute);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.idle-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.idle-table tr:hover td { background: var(--surface-2); }
+
 .toggle {
   display: flex;
   align-items: center;

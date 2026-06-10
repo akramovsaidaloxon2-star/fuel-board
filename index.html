@@ -25,6 +25,7 @@
   <main>
     <nav class="tabs">
       <button class="tab active" data-view="board"><i class="ti"></i>Fuel board</button>
+      <button class="tab" data-view="idle">Idle report</button>
       <button class="tab" data-view="coverage">Sensor coverage</button>
     </nav>
 
@@ -150,6 +151,42 @@
         </div>
         <p class="cov-note">No fuel reading captured since the board started. This list shrinks as trucks drive and report for the first time. Units that stay here after a full day of driving are the genuinely sensor-less ones (often <code>#</code>-prefixed retired trucks) — those are worth checking in Motive.</p>
         <div class="cov-grid" id="cov-list-offline"></div>
+      </div>
+    </div>
+
+    <div id="view-idle" class="hidden">
+      <section class="stats coverage-stats">
+        <div class="stat-card critical">
+          <span class="stat-label">Gallons wasted (24h)</span>
+          <span class="stat-value" id="idle-gal">0</span>
+        </div>
+        <div class="stat-card mid">
+          <span class="stat-label">Total idle hours (24h)</span>
+          <span class="stat-value" id="idle-hrs">0</span>
+        </div>
+        <div class="stat-card total">
+          <span class="stat-label">Trucks idling</span>
+          <span class="stat-value" id="idle-count">0</span>
+        </div>
+        <div class="stat-card full">
+          <span class="stat-label">Est. cost @ $3.80/gal</span>
+          <span class="stat-value" id="idle-cost">$0</span>
+        </div>
+      </section>
+
+      <div class="cov-block">
+        <div class="cov-head">
+          <h2>Idle by truck — last 24 hours</h2>
+          <button class="btn" id="copy-idle">Copy list</button>
+        </div>
+        <p class="cov-note">Hours each truck sat idling (engine on, not moving) and the fuel it burned, from Motive <code>driver_utilization</code>. Sorted by most fuel wasted. Refreshes every 20 minutes.</p>
+        <table class="idle-table">
+          <thead>
+            <tr><th>#</th><th>Unit</th><th>Driver</th><th>Idle time</th><th>Gallons wasted</th><th>Est. cost</th></tr>
+          </thead>
+          <tbody id="idle-rows"></tbody>
+        </table>
+        <div id="idle-empty" class="empty hidden">No idle data yet</div>
       </div>
     </div>
   </main>

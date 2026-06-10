@@ -175,6 +175,40 @@ function copyUnits(list, label) {
   });
 }
 
+const DIESEL_PRICE = 3.80;
+function renderIdle() {
+  const idling = fleet.filter(r => r.idleHours != null && r.idleHours > 0);
+  const totalGal = idling.reduce((a, r) => a + (r.idleGallons || 0), 0);
+  const totalHrs = idling.reduce((a, r) => a + (r.idleHours || 0), 0);
+
+  $("#idle-gal").textContent = totalGal.toFixed(1);
+  $("#idle-hrs").textContent = totalHrs.toFixed(1);
+  $("#idle-count").textContent = idling.length;
+  $("#idle-cost").textContent = "$" + Math.round(totalGal * DIESEL_PRICE).toLocaleString();
+
+  const rows = [...idling].sort((a, b) => (b.idleGallons || 0) - (a.idleGallons || 0));
+  const tbody = $("#idle-rows");
+  const empty = $("#idle-empty");
+  if (!rows.length) { tbody.innerHTML = ""; empty.classList.remove("hidden"); return; }
+  empty.classList.add("hidden");
+
+  tbody.innerHTML = rows.map((r, i) => `
+    <tr>
+      <td class="time-cell">${i + 1}</td>
+      <td><span class="unit-pill">${r.unit}</span></td>
+      <td>${r.driver}</td>
+      <td class="idle ${r.idleHours >= 5 ? "high" : r.idleHours >= 2 ? "mid" : ""}">${r.idleHours.toFixed(1)}h</td>
+      <td>${r.idleGallons.toFixed(1)} gal</td>
+      <td>$${Math.round(r.idleGallons * DIESEL_PRICE)}</td>
+    </tr>`).join("");
+
+  $("#copy-idle").onclick = () => {
+    const text = `Idle last 24h — ${rows.length} trucks, ${totalGal.toFixed(1)} gal, $${Math.round(totalGal * DIESEL_PRICE)} wasted:\n` +
+      rows.map(r => `${r.unit}\t${r.idleHours.toFixed(1)}h\t${r.idleGallons.toFixed(1)} gal`).join("\n");
+    navigator.clipboard.writeText(text).then(() => alert(`Copied ${rows.length} trucks`));
+  };
+}
+
 function setupTabs() {
   document.querySelectorAll(".tab").forEach(tab => {
     tab.addEventListener("click", () => {
@@ -183,7 +217,9 @@ function setupTabs() {
       const view = tab.dataset.view;
       $("#view-board").classList.toggle("hidden", view !== "board");
       $("#view-coverage").classList.toggle("hidden", view !== "coverage");
+      $("#view-idle").classList.toggle("hidden", view !== "idle");
       if (view === "coverage") renderCoverage();
+      if (view === "idle") renderIdle();
     });
   });
 }
@@ -214,6 +250,7 @@ async function loadData() {
   }
   render();
   if (!$("#view-coverage").classList.contains("hidden")) renderCoverage();
+  if (!$("#view-idle").classList.contains("hidden")) renderIdle();
 }
 
 $("#search").addEventListener("input", render);
