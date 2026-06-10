@@ -91,6 +91,15 @@ function render() {
     const barCell = hasFuel
       ? `<div class="fuel-bar"><div class="fuel-fill ${fc}" style="width: ${r.fuel}%; opacity:${cached ? 0.5 : 1}"></div><span class="fuel-bar-label">${r.fuel}%</span></div>`
       : `<div class="fuel-bar"><span class="fuel-bar-label" style="color:var(--text-mute)">—</span></div>`;
+
+    const mpgCell = r.mpg != null
+      ? `<span class="mpg ${r.mpg < 6 ? "bad" : r.mpg >= 7.5 ? "good" : ""}">${r.mpg.toFixed(1)}</span>`
+      : `<span style="color:var(--text-mute)">—</span>`;
+
+    const idleH = r.idleHours;
+    const idleCell = (idleH != null && idleH > 0)
+      ? `<span class="idle ${idleH >= 5 ? "high" : idleH >= 2 ? "mid" : ""}">${idleH.toFixed(1)}h</span><div class="driver-meta">${r.idleGallons != null ? r.idleGallons.toFixed(1) + " gal" : ""}</div>`
+      : `<span style="color:var(--text-mute)">—</span>`;
     return `
       <tr>
         <td class="time-cell">${i + 1}</td>
@@ -105,6 +114,8 @@ function render() {
         </td>
         <td>${fuelCell}</td>
         <td>${barCell}</td>
+        <td>${mpgCell}</td>
+        <td>${idleCell}</td>
         <td class="time-cell ${stale ? "stale" : ""}">${formatUpdated(r.updated)}</td>
         <td><span class="status-badge ${statusClass(r.status)}">${r.status}</span></td>
         <td>

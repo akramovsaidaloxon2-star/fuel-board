@@ -226,6 +226,13 @@ tbody tr:hover td { background: var(--row-hover); }
 }
 .fuel-tag.live { background: rgba(43, 182, 115, 0.18); color: #4dd699; }
 
+.mpg { font-variant-numeric: tabular-nums; font-weight: 500; }
+.mpg.good { color: var(--full); }
+.mpg.bad { color: var(--critical); }
+.idle { font-variant-numeric: tabular-nums; font-weight: 500; }
+.idle.mid { color: var(--mid); }
+.idle.high { color: var(--critical); }
+
 .toggle {
   display: flex;
   align-items: center;

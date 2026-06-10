@@ -103,6 +103,47 @@ async function fetchAllVehicleLocations() {
   return all;
 }
 
+// --- Idle hours + wasted fuel per unit (last 24h), refreshed slowly ---
+// Source: /v1/driver_utilization rollups, keyed by driver_company_id which
+// matches the vehicle number ~99% of the time in this fleet.
+let idleCache = { data: {}, at: 0 };
+const IDLE_CACHE_MS = 20 * 60 * 1000;
+
+async function fetchIdle() {
+  if (Object.keys(idleCache.data).length && Date.now() - idleCache.at < IDLE_CACHE_MS) {
+    return idleCache.data;
+  }
+  const end = new Date().toISOString();
+  const start = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const byUnit = {};
+  let page = 1, total = Infinity;
+  while ((page - 1) * 100 < total) {
+    const url = `${MOTIVE_BASE}/v1/driver_utilization?start_date=${encodeURIComponent(start)}&end_date=${encodeURIComponent(end)}&per_page=100&page_no=${page}`;
+    const res = await fetch(url, { headers: { "X-Api-Key": API_KEY } });
+    if (!res.ok) break;
+    const json = await res.json();
+    const rolls = (json.driver_idle_rollups || []).map((x) => x.driver_idle_rollup);
+    for (const r of rolls) {
+      const d = r.driver;
+      const unit = d && d.driver_company_id ? String(d.driver_company_id) : null;
+      if (!unit) continue;
+      if (!byUnit[unit]) byUnit[unit] = { idleHours: 0, idleGallons: 0 };
+      byUnit[unit].idleHours += (r.idle_time || 0) / 3600;
+      byUnit[unit].idleGallons += r.idle_fuel || 0;
+    }
+    total = json.pagination ? json.pagination.total : rolls.length;
+    if (!rolls.length) break;
+    page++;
+    if (page > 10) break;
+  }
+  for (const u in byUnit) {
+    byUnit[u].idleHours = Math.round(byUnit[u].idleHours * 10) / 10;
+    byUnit[u].idleGallons = Math.round(byUnit[u].idleGallons * 10) / 10;
+  }
+  idleCache = { data: byUnit, at: Date.now() };
+  return byUnit;
+}
+
 function ageMinFrom(iso) {
   if (!iso) return null;
   return Math.round((Date.now() - new Date(iso).getTime()) / 60000);
@@ -152,6 +193,8 @@ function mapFleet(raw) {
       fuelAgeMin: ageMinFrom(fuelAt),
       speed: loc.speed ?? null,
       odometer: loc.odometer != null ? Math.round(loc.odometer) : null,
+      mpg: (loc.odometer != null && loc.fuel != null && loc.fuel > 0)
+        ? Math.round((loc.odometer / loc.fuel) * 10) / 10 : null,
       ecm: (loc.odometer != null || loc.engine_hours != null),
       hasLocation: !!loc.located_at,
       status: statusFromSpeed(loc.speed, ageMin),
@@ -177,6 +220,15 @@ async function getFuelData() {
   if (cache.data && Date.now() - cache.at < CACHE_MS) return cache.data;
   const raw = await fetchAllVehicleLocations();
   const mapped = mapFleet(raw);
+
+  // Attach idle hours + wasted fuel (cached, non-fatal if it fails).
+  const idle = await fetchIdle().catch(() => ({}));
+  for (const row of mapped.fleet) {
+    const id = idle[row.unit];
+    row.idleHours = id ? id.idleHours : null;
+    row.idleGallons = id ? id.idleGallons : null;
+  }
+
   const payload = {
     ok: true,
     syncedAt: new Date().toISOString(),
