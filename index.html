@@ -3,21 +3,30 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Fuel Monitoring Board</title>
+  <title>MOVEX · Fuel Board</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <div class="logo">FB</div>
+      <svg class="logo-svg" viewBox="0 0 212 50" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="MOVEX">
+        <text x="0" y="37" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="40" letter-spacing="-1" class="ink">MOV</text>
+        <rect x="118" y="9" width="50" height="7" rx="1" class="ink"/>
+        <rect x="118" y="21.5" width="34" height="7" rx="1" class="red"/>
+        <polygon points="150,17 170,25 150,33" class="red"/>
+        <rect x="118" y="34" width="50" height="7" rx="1" class="ink"/>
+        <text x="174" y="37" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="40" class="ink">X</text>
+      </svg>
+      <div class="brand-divider"></div>
       <div>
-        <h1>Fuel Monitoring Board</h1>
-        <p class="subtitle">Live fuel levels — sorted low to full</p>
+        <h1>Fuel Board</h1>
+        <p class="subtitle">Excellence in every journey</p>
       </div>
     </div>
     <div class="topbar-right">
       <span class="live-dot"></span>
       <span id="last-sync">Last sync: just now</span>
+      <button id="theme-toggle" class="btn icon-btn" title="Kun / tun rejimi" aria-label="Toggle theme">🌙</button>
       <button id="refresh" class="btn">↻ Refresh</button>
     </div>
   </header>
@@ -192,8 +201,8 @@
   </main>
 
   <footer>
-    <span>Fuel Monitoring Board · v0.1</span>
-    <span>Built for dispatch + fuel teams</span>
+    <span>MOVEX · Fuel Board</span>
+    <span>Excellence in every journey</span>
   </footer>
 
   <script src="data.js"></script>

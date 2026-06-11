@@ -259,6 +259,17 @@ $("#filter-status").addEventListener("change", render);
 $("#sort-order").addEventListener("change", render);
 const noFuelToggle = $("#show-nofuel");
 if (noFuelToggle) noFuelToggle.addEventListener("change", render);
+function applyTheme(mode) {
+  document.body.classList.toggle("light", mode === "light");
+  const btn = $("#theme-toggle");
+  if (btn) btn.textContent = mode === "light" ? "☀️" : "🌙";
+  try { localStorage.setItem("fuelboard-theme", mode); } catch {}
+}
+$("#theme-toggle").addEventListener("click", () => {
+  applyTheme(document.body.classList.contains("light") ? "dark" : "light");
+});
+applyTheme((() => { try { return localStorage.getItem("fuelboard-theme") || "dark"; } catch { return "dark"; } })());
+
 $("#refresh").addEventListener("click", loadData);
 
 setupTabs();

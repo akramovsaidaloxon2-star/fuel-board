@@ -11,7 +11,27 @@
   --low: #ef9f27;
   --mid: #f5d547;
   --full: #2bb673;
+  --purple: #b994ff;
+  --track: #0b0e13;
   --row-hover: #1b2029;
+}
+
+body.light {
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --surface-2: #eef1f5;
+  --border: #dde2ea;
+  --text: #1f2a44;
+  --text-dim: #5a6478;
+  --text-mute: #8b94a6;
+  --accent: #2f6bff;
+  --critical: #d83a39;
+  --low: #d97706;
+  --mid: #c08a00;
+  --full: #1f9d63;
+  --purple: #7c3aed;
+  --track: #e7ebf1;
+  --row-hover: #f0f3f7;
 }
 
 * { box-sizing: border-box; }
@@ -29,13 +49,11 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); f
   z-index: 10;
 }
 .brand { display: flex; align-items: center; gap: 14px; }
-.logo {
-  width: 40px; height: 40px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #4d8cff, #2bb673);
-  display: flex; align-items: center; justify-content: center;
-  font-weight: 600; color: #fff; font-size: 15px;
-}
+.logo-svg { height: 30px; width: auto; display: block; }
+.logo-svg .ink { fill: var(--text); }
+.logo-svg .red { fill: #e8252d; }
+.brand-divider { width: 1px; height: 30px; background: var(--border); }
+.icon-btn { padding: 8px 10px; font-size: 15px; line-height: 1; }
 .topbar h1 { margin: 0; font-size: 18px; font-weight: 600; }
 .subtitle { margin: 2px 0 0; color: var(--text-dim); font-size: 12px; }
 
@@ -60,7 +78,7 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); f
   font-size: 13px;
   transition: background 0.15s;
 }
-.btn:hover { background: #232936; }
+.btn:hover { background: var(--row-hover); }
 
 main { padding: 20px 24px 40px; max-width: 1500px; margin: 0 auto; }
 
@@ -262,7 +280,7 @@ tbody tr:hover td { background: var(--row-hover); }
 .fuel-bar {
   width: 140px;
   height: 18px;
-  background: #0b0e13;
+  background: var(--track);
   border-radius: 4px;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -297,10 +315,10 @@ tbody tr:hover td { background: var(--row-hover); }
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
-.status-Driving { background: rgba(43, 182, 115, 0.18); color: #4dd699; }
-.status-Idle { background: rgba(245, 213, 71, 0.18); color: #f5d547; }
-.status-Parked { background: rgba(155, 108, 255, 0.18); color: #b994ff; }
-.status-Off { background: rgba(107, 115, 136, 0.25); color: #98a0b3; }
+.status-Driving { background: rgba(43, 182, 115, 0.18); color: var(--full); }
+.status-Idle { background: rgba(245, 213, 71, 0.18); color: var(--mid); }
+.status-Parked { background: rgba(155, 108, 255, 0.18); color: var(--purple); }
+.status-Off { background: rgba(107, 115, 136, 0.22); color: var(--text-dim); }
 
 .time-cell {
   font-variant-numeric: tabular-nums;
