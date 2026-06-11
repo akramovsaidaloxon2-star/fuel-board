@@ -163,7 +163,7 @@ function mapFleet(raw) {
     const v = w.vehicle || {};
     const loc = v.current_location || {};
     const d = v.current_driver;
-    const unit = v.number || String(v.id);
+    const unit = String(v.number || v.id).trim();
     const livePct = loc.fuel_primary_remaining_percentage;
     const ageMin = ageMinFrom(loc.located_at) ?? 99999;
 
@@ -281,19 +281,13 @@ let webhookLog = [];
 let webhookCount = 0;
 
 function ingestWebhookFuel(p) {
-  if (!p || typeof p !== "object") return;
-  let unit = null, pct = null;
-  (function walk(o) {
-    if (!o || typeof o !== "object") return;
-    for (const k in o) {
-      const v = o[k];
-      if ((k === "number" || k === "vehicle_number") && (typeof v === "string" || typeof v === "number")) unit = String(v);
-      if (/fuel_primary_remaining_percentage|fuel_percent|fuel_level/i.test(k) && typeof v === "number") pct = v;
-      walk(v);
-    }
-  })(p);
+  if (!p || typeof p !== "object" || Array.isArray(p)) return;
+  const unit = String(p.vehicle_number != null ? p.vehicle_number : (p.number != null ? p.number : "")).trim();
+  let pct = null;
+  if (typeof p.primary_fuel_level === "number") pct = p.primary_fuel_level;
+  else if (typeof p.fuel_primary_remaining_percentage === "number") pct = p.fuel_primary_remaining_percentage;
   if (unit && pct != null) {
-    fuelHist[unit] = { fuel: Math.round(pct * 10) / 10, at: new Date().toISOString() };
+    fuelHist[unit] = { fuel: Math.round(pct * 10) / 10, at: p.located_at || new Date().toISOString() };
     saveFuelHist();
   }
 }
