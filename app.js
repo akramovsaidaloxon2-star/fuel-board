@@ -175,7 +175,7 @@ function copyUnits(list, label) {
   });
 }
 
-const DIESEL_PRICE = 3.80;
+const DIESEL_PRICE = 4.50;
 function renderIdle() {
   const idling = fleet.filter(r => r.idleHours != null && r.idleHours > 0);
   const totalGal = idling.reduce((a, r) => a + (r.idleGallons || 0), 0);
