@@ -231,6 +231,12 @@ tbody tr:hover td { background: var(--row-hover); }
 .fuel-pct.full { color: var(--full); }
 .fuel-pct.none { color: var(--text-mute); font-size: 12px; font-weight: 500; }
 
+/* Day mode: fuel % reads as solid black for clarity (the bar still shows color). */
+body.light .fuel-pct.critical,
+body.light .fuel-pct.low,
+body.light .fuel-pct.mid,
+body.light .fuel-pct.full { color: var(--text); }
+
 .fuel-tag {
   display: inline-block;
   font-size: 10px;
