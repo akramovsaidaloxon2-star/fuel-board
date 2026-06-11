@@ -88,8 +88,12 @@ function render() {
     const fuelCell = hasFuel
       ? `<span class="fuel-pct ${fc}">${r.fuel}%</span> ${fuelTag}<div class="driver-meta">${gallons} / ${r.tankGal} gal</div>`
       : `<span class="fuel-pct none">No data yet</span>`;
+    const rangeMi = (hasFuel && r.mpg != null)
+      ? Math.round((r.fuel / 100) * r.tankGal * r.mpg) : null;
+    const rangeHtml = rangeMi != null
+      ? `<div class="range-est">≈ ${rangeMi.toLocaleString()} mi left</div>` : "";
     const barCell = hasFuel
-      ? `<div class="fuel-bar"><div class="fuel-fill ${fc}" style="width: ${r.fuel}%; opacity:${cached ? 0.5 : 1}"></div><span class="fuel-bar-label">${r.fuel}%</span></div>`
+      ? `<div class="fuel-bar"><div class="fuel-fill ${fc}" style="width: ${r.fuel}%; opacity:${cached ? 0.5 : 1}"></div><span class="fuel-bar-label">${r.fuel}%</span></div>${rangeHtml}`
       : `<div class="fuel-bar"><span class="fuel-bar-label" style="color:var(--text-mute)">—</span></div>`;
 
     const mpgCell = r.mpg != null

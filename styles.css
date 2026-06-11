@@ -341,6 +341,12 @@ body.light .fuel-pct.full { color: var(--text); }
 .fuel-fill.low { background: var(--low); }
 .fuel-fill.mid { background: var(--mid); }
 .fuel-fill.full { background: var(--full); }
+.range-est {
+  font-size: 10px;
+  color: var(--text-mute);
+  margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+}
 .fuel-bar-label {
   position: absolute;
   top: 50%; left: 50%;

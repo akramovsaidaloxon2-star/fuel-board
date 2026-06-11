@@ -206,7 +206,7 @@ function mapFleet(raw) {
       hasLocation: !!loc.located_at,
       status: statusFromSpeed(loc.speed, ageMin),
       updated: ageMin,
-      tankGal: 200,
+      tankGal: 150,
     };
   });
 
