@@ -316,6 +316,21 @@ function captureWebhook(req, res) {
   });
 }
 
+// --- Saved fuel reports (weekly/monthly), persisted by date ---
+const REPORTS_STORE = path.join(__dirname, "reports_data.json");
+let reports = [];
+try { reports = JSON.parse(fs.readFileSync(REPORTS_STORE, "utf8")); } catch { reports = []; }
+function saveReports() {
+  fs.writeFile(REPORTS_STORE, JSON.stringify(reports), () => {});
+}
+function readBody(req) {
+  return new Promise((resolve) => {
+    let b = "";
+    req.on("data", (c) => { b += c; if (b.length > 10e6) req.destroy(); });
+    req.on("end", () => { try { resolve(JSON.parse(b)); } catch { resolve(null); } });
+  });
+}
+
 // --- Server ---
 const server = http.createServer(async (req, res) => {
   // Public health check for uptime pingers (keeps the free instance awake).
@@ -348,6 +363,55 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
+
+  // --- Reports API ---
+  const reportMatch = req.url.match(/^\/api\/reports\/([\w-]+)$/);
+  if (req.url === "/api/reports" && req.method === "GET") {
+    const list = reports.map((r) => ({
+      id: r.id, type: r.type, periodStart: r.periodStart, periodEnd: r.periodEnd,
+      createdAt: r.createdAt, unitCount: r.rows ? r.rows.length : 0, totals: r.totals || null,
+    })).sort((a, b) => (b.periodStart || "").localeCompare(a.periodStart || ""));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(list));
+    return;
+  }
+  if (req.url === "/api/reports" && req.method === "POST") {
+    const body = await readBody(req);
+    if (!body || !Array.isArray(body.rows)) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "rows required" }));
+      return;
+    }
+    const rec = {
+      id: "r" + Date.now().toString(36),
+      type: body.type === "monthly" ? "monthly" : "weekly",
+      periodStart: body.periodStart || null,
+      periodEnd: body.periodEnd || null,
+      createdAt: new Date().toISOString(),
+      rows: body.rows,
+      unmatched: body.unmatched || [],
+      totals: body.totals || null,
+    };
+    reports.push(rec);
+    saveReports();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, id: rec.id }));
+    return;
+  }
+  if (reportMatch && req.method === "GET") {
+    const r = reports.find((x) => x.id === reportMatch[1]);
+    res.writeHead(r ? 200 : 404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(r || { ok: false, error: "not found" }));
+    return;
+  }
+  if (reportMatch && req.method === "DELETE") {
+    const i = reports.findIndex((x) => x.id === reportMatch[1]);
+    if (i >= 0) { reports.splice(i, 1); saveReports(); }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
   serveStatic(req, res);
 });
 

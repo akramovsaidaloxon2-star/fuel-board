@@ -3,4 +3,5 @@ node_modules/
 _sample.json
 _*.json
 fuel_cache.json
+reports_data.json
 *.log

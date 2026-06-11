@@ -39,6 +39,7 @@
       <button class="tab active" data-view="board"><i class="ti"></i>Fuel board</button>
       <button class="tab" data-view="map">Map</button>
       <button class="tab" data-view="idle">Idle report</button>
+      <button class="tab" data-view="reports">Reports</button>
       <button class="tab" data-view="coverage">Sensor coverage</button>
     </nav>
 
@@ -126,6 +127,58 @@
         <p>Fuel levels come from Motive <code>/v1/vehicle_locations</code> (<code>fuel_primary_remaining_percentage</code>), refreshed every 60s. Open this page at <code>http://localhost:3000</code> for live data — opening the file directly shows demo data. Units without an ELD fuel sensor appear as <code>No sensor</code>; hide them with the toggle above. Dispatch board integration comes next.</p>
       </div>
     </section>
+    </div>
+
+    <div id="view-reports" class="hidden">
+      <div class="rep-uploads">
+        <label class="drop" id="drop-fuel">
+          <i class="ti ti-file-spreadsheet" aria-hidden="true"></i>
+          <span class="drop-title">Fuel report (Excel)</span>
+          <span class="drop-sub" id="fuel-name">drag &amp; drop yoki bosing — RTS .xlsx</span>
+          <input type="file" id="file-fuel" accept=".xlsx,.xls" hidden />
+        </label>
+        <label class="drop" id="drop-perf">
+          <i class="ti ti-file-text" aria-hidden="true"></i>
+          <span class="drop-title">Driver Fuel Performance (CSV)</span>
+          <span class="drop-sub" id="perf-name">drag &amp; drop yoki bosing — Motive .csv (asl, Excel'da ochmagan)</span>
+          <input type="file" id="file-perf" accept=".csv" hidden />
+        </label>
+      </div>
+
+      <div class="rep-controls">
+        <label class="toggle">Davr:
+          <select id="rep-type" style="margin-left:6px">
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </label>
+        <span id="rep-period" class="rep-period"></span>
+        <button class="btn" id="rep-generate">Generate</button>
+        <button class="btn" id="rep-save" disabled>Save report</button>
+        <button class="btn" id="rep-export" disabled>Export Excel</button>
+      </div>
+
+      <div id="rep-warn" class="rep-warn hidden"></div>
+
+      <section class="stats" id="rep-stats" style="display:none">
+        <div class="stat-card total"><span class="stat-label">Units</span><span class="stat-value" id="rep-units">0</span></div>
+        <div class="stat-card full"><span class="stat-label">Total gallons</span><span class="stat-value" id="rep-gal">0</span></div>
+        <div class="stat-card mid"><span class="stat-label">Total cost</span><span class="stat-value" id="rep-cost">$0</span></div>
+        <div class="stat-card critical"><span class="stat-label">Idle gallons</span><span class="stat-value" id="rep-idle">0</span></div>
+      </section>
+
+      <div class="board" style="margin-top:14px">
+        <table class="idle-table" id="rep-table" style="display:none">
+          <thead><tr><th>Unit</th><th>Qty (gal)</th><th>Amt ($)</th><th>PPG</th><th>Miles</th><th>MPG</th><th>CPM</th><th>Idle gal</th></tr></thead>
+          <tbody id="rep-rows"></tbody>
+        </table>
+      </div>
+
+      <div class="cov-block" style="margin-top:18px">
+        <div class="cov-head"><h2>Saqlangan reportlar</h2></div>
+        <p class="cov-note">Har report sana bo'yicha saqlanadi. Ochish uchun bosing.</p>
+        <div id="rep-history"></div>
+      </div>
     </div>
 
     <div id="view-coverage" class="hidden">
@@ -223,7 +276,9 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="data.js"></script>
   <script src="app.js"></script>
+  <script src="reports.js"></script>
 </body>
 </html>

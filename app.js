@@ -299,9 +299,11 @@ function setupTabs() {
       $("#view-coverage").classList.toggle("hidden", view !== "coverage");
       $("#view-idle").classList.toggle("hidden", view !== "idle");
       $("#view-map").classList.toggle("hidden", view !== "map");
+      $("#view-reports").classList.toggle("hidden", view !== "reports");
       if (view === "coverage") renderCoverage();
       if (view === "idle") renderIdle();
       if (view === "map") renderMap();
+      if (view === "reports" && window.initReports) window.initReports();
     });
   });
 }
