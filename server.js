@@ -275,6 +275,12 @@ function serveStatic(req, res) {
 
 // --- Server ---
 const server = http.createServer(async (req, res) => {
+  // Public health check for uptime pingers (keeps the free instance awake).
+  if (req.url === "/health" || req.url === "/ping") {
+    res.writeHead(200, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
+    res.end("ok");
+    return;
+  }
   if (!checkAuth(req, res)) return;
   if (req.url.startsWith("/api/fuel")) {
     try {
