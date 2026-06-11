@@ -295,6 +295,10 @@ body.light .fuel-pct.full { color: var(--text); }
   margin-right: 4px;
 }
 .leaflet-popup-content { font-size: 13px; line-height: 1.5; color: #1f2a44; }
+.truck-div { background: transparent; border: none; }
+.truck-marker { display: flex; align-items: center; justify-content: center; }
+.truck-marker svg { filter: drop-shadow(0 1px 1.5px rgba(0,0,0,0.5)); overflow: visible; }
+.leaflet-tooltip { font-size: 12px; font-weight: 500; padding: 3px 7px; }
 
 .toggle {
   display: flex;

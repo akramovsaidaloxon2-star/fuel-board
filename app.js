@@ -217,24 +217,39 @@ function fuelColorHex(p) {
   if (p < 75) return "#f5d547";
   return "#2bb673";
 }
+function truckIcon(r) {
+  const color = fuelColorHex(r.fuel);
+  const b = r.bearing != null ? r.bearing : 0;
+  const moving = r.speed != null && r.speed > 0;
+  const shape = moving
+    ? `<svg viewBox="0 0 24 24" width="26" height="26" style="transform:rotate(${b}deg)">
+         <path d="M12 3 L18.5 20 L12 16 L5.5 20 Z" fill="${color}" stroke="rgba(0,0,0,0.5)" stroke-width="1.2"/></svg>`
+    : `<svg viewBox="0 0 24 24" width="20" height="20">
+         <circle cx="12" cy="12" r="8" fill="${color}" stroke="rgba(0,0,0,0.5)" stroke-width="1.4"/></svg>`;
+  return L.divIcon({ html: `<div class="truck-marker">${shape}</div>`, className: "truck-div", iconSize: [26, 26], iconAnchor: [13, 13] });
+}
+
 function renderMap() {
   if (!window.L) return;
   if (!mapObj) {
     mapObj = L.map("map", { zoomControl: true }).setView([39.5, -98.35], 4);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 18, attribution: "&copy; OpenStreetMap",
-    }).addTo(mapObj);
-    markersLayer = L.layerGroup().addTo(mapObj);
+    const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, attribution: "Esri, Maxar" });
+    const streets = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap" });
+    const labels = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19 });
+    sat.addTo(mapObj); labels.addTo(mapObj);
+    L.control.layers({ "Satellite": sat, "Streets": streets }, { "Place labels": labels }, { position: "topright" }).addTo(mapObj);
+    markersLayer = L.markerClusterGroup
+      ? L.markerClusterGroup({ maxClusterRadius: 45, spiderfyOnMaxZoom: true })
+      : L.layerGroup();
+    mapObj.addLayer(markersLayer);
   }
   setTimeout(() => mapObj.invalidateSize(), 60);
 
   markersLayer.clearLayers();
   const pts = fleet.filter((r) => r.lat != null && r.lon != null);
   pts.forEach((r) => {
-    const m = L.circleMarker([r.lat, r.lon], {
-      radius: 6, color: "rgba(0,0,0,0.45)", weight: 1,
-      fillColor: fuelColorHex(r.fuel), fillOpacity: 0.9,
-    });
+    const m = L.marker([r.lat, r.lon], { icon: truckIcon(r) });
+    m.bindTooltip(`${r.unit} · ${r.driver}`, { direction: "top", offset: [0, -12] });
     const fuelTxt = r.fuel != null
       ? r.fuel + "%" + (r.fuelSource === "cached" ? " (last known)" : "")
       : "No data";

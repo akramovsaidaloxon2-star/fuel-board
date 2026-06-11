@@ -188,6 +188,7 @@ function mapFleet(raw) {
       state: stateFromDesc(loc.description),
       lat: loc.lat ?? null,
       lon: loc.lon ?? null,
+      bearing: loc.bearing ?? null,
       fuel,
       fuelSource,             // "live" | "cached" | "none"
       fuelAgeMin: ageMinFrom(fuelAt),
