@@ -273,12 +273,64 @@ function serveStatic(req, res) {
   });
 }
 
+// --- Motive webhook receiver ---
+// Captures incoming webhook payloads (so we can inspect their shape) and, if a
+// payload carries a vehicle number + fuel %, updates the last-known cache — this
+// is how we'd get fuel for PARKED trucks that the pull API doesn't expose.
+let webhookLog = [];
+let webhookCount = 0;
+
+function ingestWebhookFuel(p) {
+  if (!p || typeof p !== "object") return;
+  let unit = null, pct = null;
+  (function walk(o) {
+    if (!o || typeof o !== "object") return;
+    for (const k in o) {
+      const v = o[k];
+      if ((k === "number" || k === "vehicle_number") && (typeof v === "string" || typeof v === "number")) unit = String(v);
+      if (/fuel_primary_remaining_percentage|fuel_percent|fuel_level/i.test(k) && typeof v === "number") pct = v;
+      walk(v);
+    }
+  })(p);
+  if (unit && pct != null) {
+    fuelHist[unit] = { fuel: Math.round(pct * 10) / 10, at: new Date().toISOString() };
+    saveFuelHist();
+  }
+}
+
+function captureWebhook(req, res) {
+  let body = "";
+  req.on("data", (c) => { body += c; if (body.length > 2e6) req.destroy(); });
+  req.on("end", () => {
+    webhookCount++;
+    let parsed = null;
+    try { parsed = JSON.parse(body); } catch {}
+    webhookLog.unshift({ at: new Date().toISOString(), headers: req.headers, body: parsed || body.slice(0, 3000) });
+    if (webhookLog.length > 30) webhookLog.pop();
+    try { ingestWebhookFuel(parsed); } catch {}
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("ok");
+  });
+}
+
 // --- Server ---
 const server = http.createServer(async (req, res) => {
   // Public health check for uptime pingers (keeps the free instance awake).
   if (req.url === "/health" || req.url === "/ping") {
     res.writeHead(200, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
     res.end("ok");
+    return;
+  }
+  // Motive posts webhook events here (public — Motive can't send our login).
+  if (req.url === "/webhook" && req.method === "POST") {
+    captureWebhook(req, res);
+    return;
+  }
+  // Protected: inspect what Motive has been sending.
+  if (req.url === "/webhook/debug") {
+    if (!checkAuth(req, res)) return;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ received: webhookCount, recent: webhookLog }, null, 2));
     return;
   }
   if (!checkAuth(req, res)) return;
