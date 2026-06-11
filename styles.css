@@ -272,12 +272,22 @@ body.light .fuel-pct.full { color: var(--text); }
 .idle-table tr:hover td { background: var(--surface-2); }
 
 #map {
-  height: 620px;
+  height: calc(100vh - 200px);
+  min-height: 480px;
   width: 100%;
   border-radius: 12px;
   border: 1px solid var(--border);
   overflow: hidden;
 }
+#map:fullscreen, #map:-webkit-full-screen {
+  height: 100%; width: 100%; border-radius: 0; border: none;
+}
+.leaflet-fs-btn {
+  background: #fff; width: 34px; height: 34px; line-height: 34px;
+  text-align: center; display: block; font-size: 18px; color: #333;
+  text-decoration: none; cursor: pointer;
+}
+.leaflet-fs-btn:hover { background: #f4f4f4; }
 .map-legend {
   display: flex;
   align-items: center;

@@ -242,6 +242,23 @@ function renderMap() {
       ? L.markerClusterGroup({ maxClusterRadius: 45, spiderfyOnMaxZoom: true })
       : L.layerGroup();
     mapObj.addLayer(markersLayer);
+
+    const FsControl = L.Control.extend({
+      options: { position: "topleft" },
+      onAdd: function () {
+        const wrap = L.DomUtil.create("div", "leaflet-bar");
+        const btn = L.DomUtil.create("a", "leaflet-fs-btn", wrap);
+        btn.href = "#"; btn.title = "Fullscreen"; btn.innerHTML = "⛶";
+        L.DomEvent.on(btn, "click", L.DomEvent.stop).on(btn, "click", () => {
+          const el = document.getElementById("map");
+          if (!document.fullscreenElement) { (el.requestFullscreen || el.webkitRequestFullscreen).call(el); }
+          else { (document.exitFullscreen || document.webkitExitFullscreen).call(document); }
+        });
+        return wrap;
+      },
+    });
+    mapObj.addControl(new FsControl());
+    document.addEventListener("fullscreenchange", () => setTimeout(() => mapObj.invalidateSize(), 200));
   }
   setTimeout(() => mapObj.invalidateSize(), 60);
 
