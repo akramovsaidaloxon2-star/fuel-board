@@ -209,6 +209,46 @@ function renderIdle() {
   };
 }
 
+let mapObj = null, markersLayer = null;
+function fuelColorHex(p) {
+  if (p == null) return "#6b7388";
+  if (p < 25) return "#e24b4a";
+  if (p < 50) return "#ef9f27";
+  if (p < 75) return "#f5d547";
+  return "#2bb673";
+}
+function renderMap() {
+  if (!window.L) return;
+  if (!mapObj) {
+    mapObj = L.map("map", { zoomControl: true }).setView([39.5, -98.35], 4);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 18, attribution: "&copy; OpenStreetMap",
+    }).addTo(mapObj);
+    markersLayer = L.layerGroup().addTo(mapObj);
+  }
+  setTimeout(() => mapObj.invalidateSize(), 60);
+
+  markersLayer.clearLayers();
+  const pts = fleet.filter((r) => r.lat != null && r.lon != null);
+  pts.forEach((r) => {
+    const m = L.circleMarker([r.lat, r.lon], {
+      radius: 6, color: "rgba(0,0,0,0.45)", weight: 1,
+      fillColor: fuelColorHex(r.fuel), fillOpacity: 0.9,
+    });
+    const fuelTxt = r.fuel != null
+      ? r.fuel + "%" + (r.fuelSource === "cached" ? " (last known)" : "")
+      : "No data";
+    const idleTxt = (r.idleHours > 0) ? `<br>Idle 24h: ${r.idleHours}h / ${r.idleGallons} gal` : "";
+    m.bindPopup(
+      `<b>Unit ${r.unit}</b><br>${r.driver}<br>Fuel: <b>${fuelTxt}</b>` +
+      `<br>${r.location}${r.mpg != null ? "<br>MPG: " + r.mpg : ""}${idleTxt}`
+    );
+    markersLayer.addLayer(m);
+  });
+  const cnt = document.getElementById("map-count");
+  if (cnt) cnt.textContent = pts.length + " trucks shown";
+}
+
 function setupTabs() {
   document.querySelectorAll(".tab").forEach(tab => {
     tab.addEventListener("click", () => {
@@ -218,8 +258,10 @@ function setupTabs() {
       $("#view-board").classList.toggle("hidden", view !== "board");
       $("#view-coverage").classList.toggle("hidden", view !== "coverage");
       $("#view-idle").classList.toggle("hidden", view !== "idle");
+      $("#view-map").classList.toggle("hidden", view !== "map");
       if (view === "coverage") renderCoverage();
       if (view === "idle") renderIdle();
+      if (view === "map") renderMap();
     });
   });
 }
@@ -251,6 +293,7 @@ async function loadData() {
   render();
   if (!$("#view-coverage").classList.contains("hidden")) renderCoverage();
   if (!$("#view-idle").classList.contains("hidden")) renderIdle();
+  if (!$("#view-map").classList.contains("hidden")) renderMap();
 }
 
 $("#search").addEventListener("input", render);

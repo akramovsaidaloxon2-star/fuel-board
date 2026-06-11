@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MOVEX · Fuel Board</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -34,6 +35,7 @@
   <main>
     <nav class="tabs">
       <button class="tab active" data-view="board"><i class="ti"></i>Fuel board</button>
+      <button class="tab" data-view="map">Map</button>
       <button class="tab" data-view="idle">Idle report</button>
       <button class="tab" data-view="coverage">Sensor coverage</button>
     </nav>
@@ -163,6 +165,18 @@
       </div>
     </div>
 
+    <div id="view-map" class="hidden">
+      <div class="map-legend">
+        <span><i class="dot" style="background:#e24b4a"></i> &lt;25%</span>
+        <span><i class="dot" style="background:#ef9f27"></i> 25–50%</span>
+        <span><i class="dot" style="background:#f5d547"></i> 50–75%</span>
+        <span><i class="dot" style="background:#2bb673"></i> &gt;75%</span>
+        <span><i class="dot" style="background:#6b7388"></i> No data</span>
+        <span id="map-count" style="margin-left:auto"></span>
+      </div>
+      <div id="map"></div>
+    </div>
+
     <div id="view-idle" class="hidden">
       <section class="stats coverage-stats">
         <div class="stat-card critical">
@@ -205,6 +219,7 @@
     <span>Excellence in every journey</span>
   </footer>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <script src="data.js"></script>
   <script src="app.js"></script>
 </body>
