@@ -156,6 +156,9 @@
         <button class="btn" id="rep-generate">Generate</button>
         <button class="btn" id="rep-save" disabled>Save report</button>
         <button class="btn" id="rep-export" disabled>Export Excel</button>
+        <select id="rep-history-select" class="rep-hsel">
+          <option value="">📁 Saqlangan reportni oching…</option>
+        </select>
       </div>
 
       <div id="rep-warn" class="rep-warn hidden"></div>
@@ -164,12 +167,29 @@
         <div class="stat-card total"><span class="stat-label">Units</span><span class="stat-value" id="rep-units">0</span></div>
         <div class="stat-card full"><span class="stat-label">Total gallons</span><span class="stat-value" id="rep-gal">0</span></div>
         <div class="stat-card mid"><span class="stat-label">Total cost</span><span class="stat-value" id="rep-cost">$0</span></div>
+        <div class="stat-card"><span class="stat-label">Company PPG</span><span class="stat-value" id="rep-ppg">$0</span></div>
+        <div class="stat-card"><span class="stat-label">Company MPG</span><span class="stat-value" id="rep-mpg">0</span></div>
+        <div class="stat-card"><span class="stat-label">Company CPM</span><span class="stat-value" id="rep-cpm">$0</span></div>
         <div class="stat-card critical"><span class="stat-label">Idle gallons</span><span class="stat-value" id="rep-idle">0</span></div>
       </section>
 
+      <div id="rep-lowmpg" class="cov-block hidden" style="margin-top:14px;border-color:var(--critical)">
+        <div class="cov-head"><h2 id="rep-lowmpg-title">Eng past MPG (&lt; 6)</h2></div>
+        <div class="cov-grid" id="rep-lowmpg-list"></div>
+      </div>
+
       <div class="board" style="margin-top:14px">
-        <table class="idle-table" id="rep-table" style="display:none">
-          <thead><tr><th>Unit</th><th>Qty (gal)</th><th>Amt ($)</th><th>PPG</th><th>Miles</th><th>MPG</th><th>CPM</th><th>Idle gal</th></tr></thead>
+        <table class="idle-table rep-sortable" id="rep-table" style="display:none">
+          <thead><tr>
+            <th data-col="unit">Unit<span class="arrow"></span></th>
+            <th data-col="qty">Qty (gal)<span class="arrow"></span></th>
+            <th data-col="amt">Amt ($)<span class="arrow"></span></th>
+            <th data-col="ppg">PPG<span class="arrow"></span></th>
+            <th data-col="miles">Miles<span class="arrow"></span></th>
+            <th data-col="mpg">MPG<span class="arrow"></span></th>
+            <th data-col="cpm">CPM<span class="arrow"></span></th>
+            <th data-col="idleGal">Idle gal<span class="arrow"></span></th>
+          </tr></thead>
           <tbody id="rep-rows"></tbody>
         </table>
       </div>

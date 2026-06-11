@@ -289,6 +289,10 @@ body.light .fuel-pct.full { color: var(--text); }
 .rep-warn { background: rgba(245,213,71,0.12); border: 1px solid rgba(245,213,71,0.4); color: var(--mid); padding: 8px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 10px; }
 .rep-hist { cursor: pointer; }
 .rep-hist:hover { border-color: var(--accent); }
+.rep-hsel { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 8px; margin-left: auto; max-width: 280px; }
+.rep-sortable th { cursor: pointer; user-select: none; white-space: nowrap; }
+.rep-sortable th:hover { color: var(--text); background: var(--surface-2); }
+.rep-sortable th .arrow { color: var(--accent); font-variant-numeric: tabular-nums; }
 @media (max-width: 640px) { .rep-uploads { grid-template-columns: 1fr; } }
 
 #map {
