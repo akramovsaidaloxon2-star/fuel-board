@@ -258,7 +258,10 @@ function serveStatic(req, res) {
   }
   fs.readFile(filePath, (err, data) => {
     if (err) { res.writeHead(404); res.end("Not found"); return; }
-    res.writeHead(200, { "Content-Type": MIME[path.extname(filePath)] || "text/plain" });
+    res.writeHead(200, {
+      "Content-Type": MIME[path.extname(filePath)] || "text/plain",
+      "Cache-Control": "no-cache, must-revalidate",
+    });
     res.end(data);
   });
 }
