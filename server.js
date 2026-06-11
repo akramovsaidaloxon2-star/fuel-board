@@ -56,6 +56,12 @@ let fuelHist = {}; // { [unit]: { fuel: number, at: ISOstring } }
 try {
   fuelHist = JSON.parse(fs.readFileSync(FUEL_STORE, "utf8"));
 } catch { fuelHist = {}; }
+// On a fresh/ephemeral host (e.g. Render free tier wipes the disk on every
+// restart) start from the committed seed so coverage isn't stuck at "live only".
+if (!Object.keys(fuelHist).length) {
+  try { fuelHist = JSON.parse(fs.readFileSync(path.join(__dirname, "fuel_seed.json"), "utf8")); }
+  catch { fuelHist = {}; }
+}
 
 let saveTimer = null;
 function saveFuelHist() {
