@@ -278,7 +278,9 @@ function serveStatic(req, res) {
 // payload carries a vehicle number + fuel %, updates the last-known cache — this
 // is how we'd get fuel for PARKED trucks that the pull API doesn't expose.
 let webhookLog = [];
+let webhookOther = []; // non-location events (engine on/off, faults...) kept longer
 let webhookCount = 0;
+const actionCounts = {};
 
 function ingestWebhookFuel(p) {
   if (!p || typeof p !== "object" || Array.isArray(p)) return;
@@ -301,6 +303,13 @@ function captureWebhook(req, res) {
     try { parsed = JSON.parse(body); } catch {}
     webhookLog.unshift({ at: new Date().toISOString(), headers: req.headers, body: parsed || body.slice(0, 3000) });
     if (webhookLog.length > 30) webhookLog.pop();
+    const action = parsed && parsed.action;
+    if (action) actionCounts[action] = (actionCounts[action] || 0) + 1;
+    // Keep anything that isn't a routine location ping so we can inspect it.
+    if (action && !/^vehicle_location_(received|updated)$/.test(action)) {
+      webhookOther.unshift({ at: new Date().toISOString(), body: parsed });
+      if (webhookOther.length > 25) webhookOther.pop();
+    }
     try { ingestWebhookFuel(parsed); } catch {}
     res.writeHead(200, { "Content-Type": "text/plain" });
     res.end("ok");
@@ -324,7 +333,7 @@ const server = http.createServer(async (req, res) => {
   if (req.url === "/webhook/debug") {
     if (!checkAuth(req, res)) return;
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ received: webhookCount, recent: webhookLog }, null, 2));
+    res.end(JSON.stringify({ received: webhookCount, actionCounts, other: webhookOther, recent: webhookLog }, null, 2));
     return;
   }
   if (!checkAuth(req, res)) return;
