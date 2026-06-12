@@ -13,3 +13,10 @@ services:
         sync: false
       - key: AUTH_PASS
         sync: false
+      # Durable storage: saved reports + fuel history are backed up to a
+      # private GitHub repo so they survive restarts/redeploys (free plan
+      # wipes the local disk). Set both in the Render dashboard.
+      - key: GH_REPO
+        sync: false
+      - key: GH_TOKEN
+        sync: false
