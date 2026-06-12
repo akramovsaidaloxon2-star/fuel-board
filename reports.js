@@ -162,18 +162,30 @@
   }
 
   function renderCheck(unit, results) {
-    const badge = (v) => v === "ok" ? '<span style="color:var(--full);font-weight:600">✓ mos</span>'
-      : v === "mismatch" ? '<span style="color:var(--critical);font-weight:600">⚠️ MOS EMAS</span>'
-      : v === "no-data" ? '<span style="color:var(--text-mute)">period yo\'q</span>'
-      : '<span style="color:var(--text-mute)">Motive\'da yo\'q</span>';
+    const verdictBadge = (r) => {
+      const v = r.combined || r.verdict;
+      if (v === "all-good") return '<span style="color:var(--full);font-weight:600">✅ ALL GOOD</span>';
+      if (v === "fraud") return '<span style="color:var(--critical);font-weight:600">🚨 FRAUD</span>';
+      if (v === "ok") return '<span style="color:var(--full)">✓ joy mos</span>';
+      if (v === "mismatch") return '<span style="color:var(--critical);font-weight:600">⚠️ joy mos emas</span>';
+      if (v === "no-data") return '<span style="color:var(--text-mute)">period yo\'q</span>';
+      return '<span style="color:var(--text-mute)">Motive\'da yo\'q</span>';
+    };
+    const fuelCell = (r) => {
+      if (r.fuelVerdict === "rose") return `<span style="color:var(--full)">+${r.rise}% ✓</span>`;
+      if (r.fuelVerdict === "no-rise") return `<span style="color:var(--critical)">+${r.rise}% ⚠️ ko'tarilmadi</span>`;
+      return '<span style="color:var(--text-mute)" title="fuel level tarixi hozircha yo\'q (kelajakda yig\'iladi)">—</span>';
+    };
     const el = $("#rep-check-detail");
     el.innerHTML = `<h3 style="font-size:15px;margin:0 0 8px">Unit ${unit} — transaksiya tekshiruvi</h3>
-      <table class="idle-table"><thead><tr><th>Sana</th><th>Vaqt</th><th>Fuel stop</th><th>Gal</th><th>Truck o'sha vaqtda</th><th>Holat</th></tr></thead><tbody>` +
+      <table class="idle-table"><thead><tr><th>Sana</th><th>Vaqt</th><th>Fuel stop</th><th>Gal</th><th>Truck o'sha vaqtda</th><th>Fuel level</th><th>Verdikt</th></tr></thead><tbody>` +
       results.map((r) => `<tr>
         <td>${r.date || "—"}</td><td>${r.time || "—"}</td>
         <td>${r.fuelCity}, ${r.fuelState}</td><td>${r.qty}</td>
         <td>${(r.truckCities || []).join(", ") || "—"} ${r.truckStates && r.truckStates.length ? "[" + r.truckStates.join(",") + "]" : ""}</td>
-        <td>${badge(r.verdict)}</td></tr>`).join("") + `</tbody></table>`;
+        <td>${fuelCell(r)}</td>
+        <td>${verdictBadge(r)}</td></tr>`).join("") + `</tbody></table>
+      <p class="cov-note" style="margin-top:8px">💡 <strong>Fuel level</strong> — truck baki ko'tarilganmi (eng kuchli isbot). Hozircha tarix yig'ilmoqda — o'tgan davrlar uchun "—", <strong>kelajakdagi</strong> reportlarda to'liq ishlaydi.</p>`;
     el.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 

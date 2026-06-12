@@ -71,6 +71,32 @@ function saveFuelHist() {
   }, 500);
 }
 
+// --- Fuel-level time series (built from live readings, going forward) ---
+// Lets us later verify a fuel purchase actually raised the tank level.
+const SERIES_STORE = path.join(__dirname, "fuel_series.json");
+let fuelSeries = {};
+try { fuelSeries = JSON.parse(fs.readFileSync(SERIES_STORE, "utf8")); } catch { fuelSeries = {}; }
+let seriesTimer = null;
+function saveFuelSeries() {
+  clearTimeout(seriesTimer);
+  seriesTimer = setTimeout(() => fs.writeFile(SERIES_STORE, JSON.stringify(fuelSeries), () => {}), 3000);
+}
+function recordFuelPoint(unit, fuel, atISO) {
+  if (!unit || typeof fuel !== "number") return;
+  const t = atISO ? new Date(atISO).getTime() : Date.now();
+  if (!Number.isFinite(t)) return;
+  const arr = (fuelSeries[unit] = fuelSeries[unit] || []);
+  const last = arr[arr.length - 1];
+  // skip near-duplicate readings (keeps the series compact, still catches jumps)
+  if (last && Math.abs(last[0] - t) < 10 * 60000 && Math.abs(last[1] - fuel) < 0.5) return;
+  arr.push([t, fuel]);
+  arr.sort((a, b) => a[0] - b[0]);
+  const cutoff = Date.now() - 90 * 864e5;
+  while (arr.length && arr[0][0] < cutoff) arr.shift();
+  if (arr.length > 5000) arr.splice(0, arr.length - 5000);
+  saveFuelSeries();
+}
+
 // --- Helpers ---
 function statusFromSpeed(speed, ageMin) {
   if (ageMin > 720) return "Off duty"; // no update for >12h
@@ -178,6 +204,7 @@ function mapFleet(raw) {
         fuelHist[unit] = { fuel, at: fuelAt };
         dirty = true;
       }
+      recordFuelPoint(unit, fuel, fuelAt);
     } else if (fuelHist[unit]) {
       // Parked / engine off: fall back to the last value we ever saw.
       fuel = fuelHist[unit].fuel;
@@ -289,8 +316,10 @@ function ingestWebhookFuel(p) {
   if (typeof p.primary_fuel_level === "number") pct = p.primary_fuel_level;
   else if (typeof p.fuel_primary_remaining_percentage === "number") pct = p.fuel_primary_remaining_percentage;
   if (unit && pct != null) {
-    fuelHist[unit] = { fuel: Math.round(pct * 10) / 10, at: p.located_at || new Date().toISOString() };
+    const f = Math.round(pct * 10) / 10;
+    fuelHist[unit] = { fuel: f, at: p.located_at || new Date().toISOString() };
     saveFuelHist();
+    recordFuelPoint(unit, f, p.located_at);
   }
 }
 
@@ -396,7 +425,25 @@ async function checkTransactions(periodStart, periodEnd, transactions) {
       else if (!states.size) verdict = "no-data";
       else if (states.has(fuelSt)) verdict = "ok";
       else verdict = "mismatch";
-      out.push({ unit, date: t.date, time: t.time, fuelCity: t.city, fuelState: t.state, qty: t.qty, truckStates: [...states], truckCities: [...new Set(cities)].slice(0, 3), verdict });
+
+      // Did the tank fuel level actually rise around the transaction? (strongest proof)
+      const series = fuelSeries[unit] || (/^\d+$/.test(unit) ? fuelSeries[unit.padStart(4, "0")] : null) || [];
+      const FW = 6 * 3600 * 1000;
+      const before = series.filter((p) => p[0] <= T && p[0] >= T - FW).map((p) => p[1]);
+      const after = series.filter((p) => p[0] >= T && p[0] <= T + FW).map((p) => p[1]);
+      let fuelVerdict = "no-fuel-data", rise = null;
+      if (before.length && after.length) {
+        rise = +(Math.max(...after) - Math.min(...before)).toFixed(1);
+        fuelVerdict = rise > 10 ? "rose" : "no-rise";
+      }
+      // Combined: fuel-level evidence wins when we have it.
+      let combined = verdict;
+      if (fuelVerdict === "rose") combined = "all-good";
+      else if (fuelVerdict === "no-rise") combined = "fraud";
+
+      out.push({ unit, date: t.date, time: t.time, fuelCity: t.city, fuelState: t.state, qty: t.qty,
+        truckStates: [...states], truckCities: [...new Set(cities)].slice(0, 3),
+        verdict, fuelVerdict, rise, combined });
     }
   }
   return out;

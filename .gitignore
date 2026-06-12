@@ -3,5 +3,6 @@ node_modules/
 _sample.json
 _*.json
 fuel_cache.json
+fuel_series.json
 reports_data.json
 *.log
