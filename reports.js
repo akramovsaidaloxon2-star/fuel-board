@@ -1,6 +1,6 @@
 (function () {
   const $ = (s) => document.querySelector(s);
-  let fuelAgg = null, perfAgg = null;
+  let fuelAgg = null, perfAgg = null, allTx = [];
   let period = { start: null, end: null };
   let computed = null;
   let wired = false;
@@ -13,18 +13,20 @@
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, { type: "array" });
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: null });
-    const agg = {}; let minD = null, maxD = null;
+    const agg = {}; const tx = []; let minD = null, maxD = null;
     for (const r of rows) {
       const item = String(r.Item || "").toUpperCase();
       const unit = String(r.Unit == null ? "" : r.Unit).trim();
       const d = r["Tran Date"];
-      if (d) { const s = String(d).slice(0, 10); if (!minD || s < minD) minD = s; if (!maxD || s > maxD) maxD = s; }
+      const ds = d ? String(d).slice(0, 10) : null;
+      if (ds) { if (!minD || ds < minD) minD = ds; if (!maxD || ds > maxD) maxD = ds; }
       if (item !== "ULSD" || !unit) continue;
       if (!agg[unit]) agg[unit] = { qty: 0, amt: 0 };
       agg[unit].qty += Number(r.Qty) || 0;
       agg[unit].amt += Number(r.Amt) || 0;
+      tx.push({ unit, date: ds, time: r["Tran Time"], city: String(r.City || "").trim(), state: String(r["State/ Prov"] || "").trim(), qty: +(Number(r.Qty) || 0).toFixed(1), loc: r["Location Name"] });
     }
-    fuelAgg = agg; period = { start: minD, end: maxD };
+    fuelAgg = agg; allTx = tx; period = { start: minD, end: maxD };
     $("#fuel-name").textContent = file.name + " · " + Object.keys(agg).length + " unit";
     $("#drop-fuel").classList.add("ok");
     $("#rep-period").textContent = period.start ? period.start + " → " + period.end : "";
@@ -99,7 +101,15 @@
       box.classList.remove("hidden");
       $("#rep-lowmpg-title").textContent = `Eng past MPG (< 6) — ${low.length} ta`;
       $("#rep-lowmpg-list").innerHTML = low.map((r) => `
-        <div class="cov-item"><span class="u">${r.unit}</span><span class="m mpg bad">${r.mpg} MPG</span><span class="a">${fmt(r.miles, 0)} mi · ${fmt(r.qty, 0)} gal</span></div>`).join("");
+        <div class="cov-item">
+          <span class="u">${r.unit}</span>
+          <span class="m mpg bad">${r.mpg} MPG</span>
+          <span class="a">${fmt(r.miles, 0)} mi · ${fmt(r.qty, 0)} gal</span>
+          <button class="btn rep-check-btn" data-unit="${r.unit}" style="margin-top:6px">🔍 Check</button>
+        </div>`).join("");
+      $("#rep-lowmpg-list").querySelectorAll(".rep-check-btn").forEach((b) =>
+        b.addEventListener("click", () => checkUnit(b.dataset.unit, b)));
+      $("#rep-check-detail").innerHTML = "";
     } else box.classList.add("hidden");
 
     renderRows();
@@ -137,6 +147,35 @@
 
   function warn(msg) { const w = $("#rep-warn"); w.textContent = "⚠️ " + msg; w.classList.remove("hidden"); }
   function clearWarn() { $("#rep-warn").classList.add("hidden"); }
+
+  // ---- Transaction location check ----
+  async function checkUnit(unit, btn) {
+    const txs = allTx.filter((t) => t.unit === unit);
+    if (!txs.length) { alert("Bu unit transaksiyalari yuklangan fuel report'da yo'q (saqlangan reportda transaksiya saqlanmaydi). Asl fayllarni qayta yuklang."); return; }
+    const old = btn.textContent; btn.textContent = "…"; btn.disabled = true;
+    try {
+      const res = await fetch("/api/fuel-check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ periodStart: period.start, periodEnd: period.end, transactions: txs }) });
+      const j = await res.json();
+      renderCheck(unit, j.results || []);
+    } catch (e) { alert("Xato: " + e.message); }
+    btn.textContent = old; btn.disabled = false;
+  }
+
+  function renderCheck(unit, results) {
+    const badge = (v) => v === "ok" ? '<span style="color:var(--full);font-weight:600">✓ mos</span>'
+      : v === "mismatch" ? '<span style="color:var(--critical);font-weight:600">⚠️ MOS EMAS</span>'
+      : v === "no-data" ? '<span style="color:var(--text-mute)">period yo\'q</span>'
+      : '<span style="color:var(--text-mute)">Motive\'da yo\'q</span>';
+    const el = $("#rep-check-detail");
+    el.innerHTML = `<h3 style="font-size:15px;margin:0 0 8px">Unit ${unit} — transaksiya tekshiruvi</h3>
+      <table class="idle-table"><thead><tr><th>Sana</th><th>Vaqt</th><th>Fuel stop</th><th>Gal</th><th>Truck o'sha vaqtda</th><th>Holat</th></tr></thead><tbody>` +
+      results.map((r) => `<tr>
+        <td>${r.date || "—"}</td><td>${r.time || "—"}</td>
+        <td>${r.fuelCity}, ${r.fuelState}</td><td>${r.qty}</td>
+        <td>${(r.truckCities || []).join(", ") || "—"} ${r.truckStates && r.truckStates.length ? "[" + r.truckStates.join(",") + "]" : ""}</td>
+        <td>${badge(r.verdict)}</td></tr>`).join("") + `</tbody></table>`;
+    el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
 
   // ---- Save / history ----
   async function save() {

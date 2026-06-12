@@ -331,6 +331,77 @@ function readBody(req) {
   });
 }
 
+// --- Fuel transaction location check (was the truck at the fuel stop?) ---
+let vehIdMap = null, vehIdMapAt = 0;
+async function getVehicleIdMap() {
+  if (vehIdMap && Date.now() - vehIdMapAt < 30 * 60 * 1000) return vehIdMap;
+  const map = {};
+  for (let page = 1; page <= 5; page++) {
+    const res = await fetch(`${MOTIVE_BASE}/v1/vehicle_locations?per_page=100&page_no=${page}`, { headers: { "X-Api-Key": API_KEY } });
+    if (!res.ok) break;
+    const j = await res.json();
+    (j.vehicles || []).forEach((w) => { map[String(w.vehicle.number).trim()] = w.vehicle.id; });
+    if (!j.pagination || page * 100 >= j.pagination.total) break;
+  }
+  vehIdMap = map; vehIdMapAt = Date.now();
+  return map;
+}
+async function fetchUnitPeriods(id, startISO, endISO) {
+  const periods = []; let page = 1, total = Infinity;
+  while ((page - 1) * 100 < total && page <= 6) {
+    const url = `${MOTIVE_BASE}/v1/driving_periods?vehicle_ids[]=${id}&start_date=${encodeURIComponent(startISO)}&end_date=${encodeURIComponent(endISO)}&per_page=100&page_no=${page}`;
+    const res = await fetch(url, { headers: { "X-Api-Key": API_KEY } });
+    if (!res.ok) break;
+    const j = await res.json();
+    const arr = j.driving_periods || [];
+    arr.forEach((w) => { const p = w.driving_period; periods.push({ st: new Date(p.start_time).getTime(), en: new Date(p.end_time).getTime(), o: p.origin, d: p.destination }); });
+    total = j.pagination ? j.pagination.total : arr.length;
+    if (!arr.length) break; page++;
+  }
+  return periods;
+}
+function addrState(a) { const m = String(a || "").match(/,\s*([A-Z]{2})\s*\d{5}/); return m ? m[1] : null; }
+function addrCity(a) { const m = String(a || "").match(/,\s*([^,]+),\s*[A-Z]{2}\s*\d{5}/); return m ? m[1].trim() : null; }
+async function checkTransactions(periodStart, periodEnd, transactions) {
+  const idMap = await getVehicleIdMap();
+  const byUnit = {};
+  transactions.forEach((t) => { (byUnit[t.unit] = byUnit[t.unit] || []).push(t); });
+  const startISO = (periodStart || "2026-01-01") + "T00:00:00Z";
+  const endISO = (periodEnd || periodStart || "2026-12-31") + "T23:59:59Z";
+  const W = 4 * 3600 * 1000;
+  const out = [];
+  for (const unit of Object.keys(byUnit)) {
+    let id = idMap[unit];
+    if (!id && /^\d+$/.test(unit)) id = idMap[unit.padStart(4, "0")];
+    let periods = [];
+    if (id) { try { periods = await fetchUnitPeriods(id, startISO, endISO); } catch {} }
+    for (const t of byUnit[unit]) {
+      const T = new Date(t.date + "T" + (t.time || "00:00") + ":00Z").getTime();
+      const states = new Set(), cities = [];
+      const add = (a) => { const s = addrState(a); if (s) states.add(s); const c = addrCity(a); if (c) cities.push(c); };
+      // periods overlapping a window around the fuel time (truck driving then)
+      periods.filter((p) => p.en >= T - W && p.st <= T + W).forEach((p) => { add(p.o); add(p.d); });
+      // truck fuels while stopped: take the destination of the last trip before T
+      // and the origin of the first trip after T (that parked spot ~ the fuel stop).
+      let prev = null, next = null;
+      for (const p of periods) {
+        if (p.en <= T && (!prev || p.en > prev.en)) prev = p;
+        if (p.st >= T && (!next || p.st < next.st)) next = p;
+      }
+      if (prev) add(prev.d);
+      if (next) add(next.o);
+      const fuelSt = String(t.state || "").toUpperCase();
+      let verdict = "unknown";
+      if (!id) verdict = "no-motive";
+      else if (!states.size) verdict = "no-data";
+      else if (states.has(fuelSt)) verdict = "ok";
+      else verdict = "mismatch";
+      out.push({ unit, date: t.date, time: t.time, fuelCity: t.city, fuelState: t.state, qty: t.qty, truckStates: [...states], truckCities: [...new Set(cities)].slice(0, 3), verdict });
+    }
+  }
+  return out;
+}
+
 // --- Server ---
 const server = http.createServer(async (req, res) => {
   // Public health check for uptime pingers (keeps the free instance awake).
@@ -352,7 +423,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (!checkAuth(req, res)) return;
-  if (req.url.startsWith("/api/fuel")) {
+  if (req.url === "/api/fuel" || req.url.startsWith("/api/fuel?")) {
     try {
       const data = await getFuelData();
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -409,6 +480,24 @@ const server = http.createServer(async (req, res) => {
     if (i >= 0) { reports.splice(i, 1); saveReports(); }
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  if (req.url === "/api/fuel-check" && req.method === "POST") {
+    const body = await readBody(req);
+    if (!body || !Array.isArray(body.transactions)) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "transactions required" }));
+      return;
+    }
+    try {
+      const results = await checkTransactions(body.periodStart, body.periodEnd, body.transactions);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, results }));
+    } catch (e) {
+      res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+    }
     return;
   }
 
