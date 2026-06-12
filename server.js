@@ -44,6 +44,38 @@ if (!API_KEY) {
   console.error("⚠  MOTIVE_API_KEY is missing. Add it to .env");
 }
 
+// --- Durable storage via a private GitHub repo (survives restarts/deploys) ---
+const GH_TOKEN = process.env.GH_TOKEN || "";
+const GH_REPO = process.env.GH_REPO || ""; // e.g. "owner/fuel-board-data"
+const GH_ON = !!(GH_TOKEN && GH_REPO);
+const ghSha = {};
+const ghHeaders = () => ({ Authorization: `Bearer ${GH_TOKEN}`, "User-Agent": "fuel-board", Accept: "application/vnd.github+json" });
+async function ghLoad(file) {
+  if (!GH_ON) return null;
+  try {
+    const r = await fetch(`https://api.github.com/repos/${GH_REPO}/contents/${file}`, { headers: ghHeaders() });
+    if (r.status === 404) return undefined; // file not there yet
+    if (!r.ok) { console.error("ghLoad", file, r.status); return null; }
+    const j = await r.json();
+    ghSha[file] = j.sha;
+    return JSON.parse(Buffer.from(j.content, "base64").toString("utf8"));
+  } catch (e) { console.error("ghLoad err", file, e.message); return null; }
+}
+const ghTimers = {};
+function ghSave(file, obj) {
+  if (!GH_ON) return;
+  clearTimeout(ghTimers[file]);
+  ghTimers[file] = setTimeout(async () => {
+    try {
+      const body = { message: `update ${file}`, content: Buffer.from(JSON.stringify(obj)).toString("base64") };
+      if (ghSha[file]) body.sha = ghSha[file];
+      const r = await fetch(`https://api.github.com/repos/${GH_REPO}/contents/${file}`, { method: "PUT", headers: { ...ghHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!r.ok) { console.error("ghSave", file, r.status, (await r.text()).slice(0, 140)); return; }
+      ghSha[file] = (await r.json()).content.sha;
+    } catch (e) { console.error("ghSave err", file, e.message); }
+  }, 4000);
+}
+
 // --- Simple in-memory cache so we don't hammer the Motive API ---
 let cache = { data: null, at: 0 };
 const CACHE_MS = 45 * 1000;
@@ -79,7 +111,10 @@ try { fuelSeries = JSON.parse(fs.readFileSync(SERIES_STORE, "utf8")); } catch { 
 let seriesTimer = null;
 function saveFuelSeries() {
   clearTimeout(seriesTimer);
-  seriesTimer = setTimeout(() => fs.writeFile(SERIES_STORE, JSON.stringify(fuelSeries), () => {}), 3000);
+  seriesTimer = setTimeout(() => {
+    fs.writeFile(SERIES_STORE, JSON.stringify(fuelSeries), () => {});
+    ghSave("fuel_series.json", fuelSeries);
+  }, 3000);
 }
 function recordFuelPoint(unit, fuel, atISO) {
   if (!unit || typeof fuel !== "number") return;
@@ -351,6 +386,7 @@ let reports = [];
 try { reports = JSON.parse(fs.readFileSync(REPORTS_STORE, "utf8")); } catch { reports = []; }
 function saveReports() {
   fs.writeFile(REPORTS_STORE, JSON.stringify(reports), () => {});
+  ghSave("reports_data.json", reports);
 }
 function readBody(req) {
   return new Promise((resolve) => {
@@ -551,9 +587,22 @@ const server = http.createServer(async (req, res) => {
   serveStatic(req, res);
 });
 
+// Load durable data from the private GitHub repo on startup (overrides the
+// ephemeral local disk copy), so reports + fuel history survive any restart.
+async function initDurable() {
+  if (!GH_ON) return;
+  const r = await ghLoad("reports_data.json");
+  if (Array.isArray(r)) reports = r;
+  const s = await ghLoad("fuel_series.json");
+  if (s && typeof s === "object") fuelSeries = s;
+  console.log(`  Durable store:       GitHub ${GH_REPO} ✓ (reports: ${reports.length})`);
+}
+
 server.listen(PORT, () => {
   console.log(`\n  Fuel board running:  http://localhost:${PORT}`);
   console.log(`  API endpoint:        http://localhost:${PORT}/api/fuel`);
   console.log(`  Motive key:          ${API_KEY ? "loaded ✓" : "MISSING ✗"}`);
-  console.log(`  Login:               ${AUTH_ON ? `on (user: ${AUTH_USER}) ✓` : "OFF — set AUTH_USER/AUTH_PASS for cloud"}\n`);
+  console.log(`  Login:               ${AUTH_ON ? `on (user: ${AUTH_USER}) ✓` : "OFF — set AUTH_USER/AUTH_PASS for cloud"}`);
+  console.log(`  Durable store:       ${GH_ON ? "configuring…" : "OFF — set GH_TOKEN/GH_REPO for permanence"}\n`);
+  initDurable().catch((e) => console.error("initDurable", e.message));
 });
