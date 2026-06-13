@@ -421,6 +421,15 @@ function saveReports() {
   fs.writeFile(REPORTS_STORE, JSON.stringify(reports), () => {});
   ghSave("reports_data.json", reports);
 }
+
+// --- Toll / route-compliance board (manually entered, persisted) ---
+const TOLL_STORE = path.join(__dirname, "toll_data.json");
+let tollRows = [];
+try { tollRows = JSON.parse(fs.readFileSync(TOLL_STORE, "utf8")); } catch { tollRows = []; }
+function saveToll() {
+  fs.writeFile(TOLL_STORE, JSON.stringify(tollRows), () => {});
+  ghSave("toll_data.json", tollRows);
+}
 function readBody(req) {
   return new Promise((resolve) => {
     let b = "";
@@ -599,6 +608,19 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.url === "/api/toll" && req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(tollRows));
+    return;
+  }
+  if (req.url === "/api/toll" && req.method === "POST") {
+    const body = await readBody(req);
+    if (body && Array.isArray(body.rows)) { tollRows = body.rows; saveToll(); }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, count: tollRows.length }));
+    return;
+  }
+
   if (req.url.startsWith("/api/perf-auto")) {
     const q = new URL(req.url, "http://x").searchParams;
     const start = q.get("start"), end = q.get("end");
@@ -655,6 +677,8 @@ async function initDurable() {
   if (s && typeof s === "object") fuelSeries = s;
   const o = await ghLoad("odo_daily.json");
   if (o && typeof o === "object") odoDaily = o;
+  const tl = await ghLoad("toll_data.json");
+  if (Array.isArray(tl)) tollRows = tl;
   console.log(`  Durable store:       GitHub ${GH_REPO} ✓ (reports: ${reports.length})`);
 }
 

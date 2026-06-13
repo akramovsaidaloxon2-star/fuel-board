@@ -41,6 +41,7 @@
       <button class="tab" data-view="idle"><span class="tab-ic">⏱️</span>Idle report</button>
       <button class="tab" data-view="reports"><span class="tab-ic">📊</span>Reports</button>
       <button class="tab" data-view="ranking"><span class="tab-ic">🏆</span>Ranking</button>
+      <button class="tab" data-view="toll"><span class="tab-ic">🛣️</span>Toll</button>
       <button class="tab" data-view="coverage"><span class="tab-ic">📡</span>Sensor coverage</button>
     </nav>
     <div class="content-area">
@@ -240,6 +241,25 @@
       </div>
     </div>
 
+    <div id="view-toll" class="hidden">
+      <div class="rep-controls">
+        <button class="btn" id="toll-add">➕ Qator qo'shish</button>
+        <button class="btn" id="toll-save">💾 Saqlash</button>
+        <span id="toll-totals" class="rep-period"></span>
+      </div>
+      <div class="board" style="overflow-x:auto">
+        <table class="idle-table toll-table" id="toll-table">
+          <thead><tr>
+            <th>Driver</th><th>Unit</th><th>Load ID</th><th>Date</th><th>From&gt;To</th>
+            <th>Toll calc</th><th>Given dir</th><th>Est diff</th><th>Status</th>
+            <th>DH</th><th>Dispatched</th><th>Directed</th><th>Extra</th>
+            <th>Driven</th><th>Total Driven</th><th>Driven toll</th><th>Charge</th><th></th>
+          </tr></thead>
+          <tbody id="toll-rows"></tbody>
+        </table>
+      </div>
+    </div>
+
     <div id="view-coverage" class="hidden">
       <section class="stats coverage-stats">
         <div class="stat-card full">
@@ -340,5 +360,6 @@
   <script src="data.js"></script>
   <script src="app.js"></script>
   <script src="reports.js"></script>
+  <script src="toll.js"></script>
 </body>
 </html>

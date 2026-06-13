@@ -320,6 +320,17 @@ body.light .fuel-pct.full { color: var(--text); }
 .rank-table th[data-rcol]:hover { color: var(--text); background: var(--surface-2); }
 .rank-table th.active { color: var(--accent); }
 .rank-pos { font-weight: 600; font-size: 15px; text-align: center; width: 44px; }
+
+.toll-table { font-size: 12px; }
+.toll-table th { white-space: nowrap; font-size: 10px; }
+.toll-table td { padding: 3px 4px; }
+.toll-table input { height: 28px; font-size: 12px; padding: 0 6px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 5px; }
+.toll-table input:focus { border-color: var(--accent); outline: none; }
+.toll-auto { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.toll-status { height: 28px; font-size: 11px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 5px; }
+.toll-status.ok { background: rgba(43,182,115,0.18); color: var(--full); border-color: var(--full); }
+.toll-status.no { background: rgba(226,75,74,0.18); color: var(--critical); border-color: var(--critical); }
+.toll-del { padding: 4px 8px; color: var(--critical); }
 @media (max-width: 640px) { .rep-uploads { grid-template-columns: 1fr; } }
 
 #map {

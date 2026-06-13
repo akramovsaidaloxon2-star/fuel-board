@@ -301,11 +301,13 @@ function setupTabs() {
       $("#view-map").classList.toggle("hidden", view !== "map");
       $("#view-reports").classList.toggle("hidden", view !== "reports");
       $("#view-ranking").classList.toggle("hidden", view !== "ranking");
+      $("#view-toll").classList.toggle("hidden", view !== "toll");
       if (view === "coverage") renderCoverage();
       if (view === "idle") renderIdle();
       if (view === "map") renderMap();
       if (view === "reports" && window.initReports) window.initReports();
       if (view === "ranking" && window.initRanking) window.initRanking();
+      if (view === "toll" && window.initToll) window.initToll();
     });
   });
 }
