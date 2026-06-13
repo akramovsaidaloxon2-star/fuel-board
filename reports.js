@@ -271,40 +271,63 @@
     XLSX.writeFile(wb, `Fuel Report ${period.start || ""}_${period.end || ""}.xlsx`);
   }
 
-  // ---- Ranking ----
-  function rankSection(title, sorted, valueFn, cls) {
-    if (!sorted.length) return "";
-    return `<div class="cov-block"><div class="cov-head"><h2>${title}</h2></div><div class="cov-grid">` +
-      sorted.map((r, i) => `<div class="cov-item">
-        <span class="u">#${i + 1} · ${r.unit}</span>
-        <span class="m">${r.driver || "—"}</span>
-        <span class="rank-val ${cls}">${valueFn(r)}</span>
-      </div>`).join("") + `</div></div>`;
+  // ---- Ranking (full leaderboard) ----
+  let rankRows = [], rankCol = "mpg", rankDir = -1, rankWired = false;
+
+  function renderRankTable() {
+    const rows = [...rankRows].sort((a, b) => {
+      let x = a[rankCol], y = b[rankCol];
+      if (x == null && y == null) return 0;
+      if (x == null) return 1; if (y == null) return -1;
+      return (x - y) * rankDir;
+    });
+    const tbody = $("#rank-rows");
+    if (!rows.length) { tbody.innerHTML = ""; $("#rank-empty").classList.remove("hidden"); return; }
+    $("#rank-empty").classList.add("hidden");
+    const medal = (i) => i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : (i + 1);
+    tbody.innerHTML = rows.map((r, i) => `
+      <tr>
+        <td class="rank-pos">${medal(i)}</td>
+        <td><span class="unit-pill">${r.unit}</span></td>
+        <td>${r.driver || "—"}</td>
+        <td class="${r.mpg != null && r.mpg < 6 ? "mpg bad" : (r.mpg >= 7.5 ? "mpg good" : "")}">${r.mpg ?? "—"}</td>
+        <td class="${r.idleGal >= 30 ? "idle high" : (r.idleGal >= 15 ? "idle mid" : "")}">${r.idleGal ?? "—"}</td>
+        <td>${r.cpm != null ? "$" + r.cpm : "—"}</td>
+        <td>${r.miles != null ? fmt(r.miles, 0) : "—"}</td>
+        <td>${fmt(r.qty, 0)}</td>
+        <td>$${fmt(r.amt, 0)}</td>
+      </tr>`).join("");
+    document.querySelectorAll("#rank-table th[data-rcol]").forEach((th) =>
+      th.classList.toggle("active", th.dataset.rcol === rankCol));
   }
-  function renderRanking(rows) {
-    const wMpg = rows.filter((r) => r.mpg != null);
-    const wIdle = rows.filter((r) => r.idleGal != null);
-    const wCpm = rows.filter((r) => r.cpm != null);
-    $("#rank-content").innerHTML =
-      rankSection("🏆 Eng yaxshi MPG", [...wMpg].sort((a, b) => b.mpg - a.mpg).slice(0, 5), (r) => r.mpg + " MPG", "good") +
-      rankSection("🔻 Eng yomon MPG", [...wMpg].sort((a, b) => a.mpg - b.mpg).slice(0, 5), (r) => r.mpg + " MPG", "bad") +
-      rankSection("💧 Eng ko'p idle (behuda yoqilg'i)", [...wIdle].sort((a, b) => b.idleGal - a.idleGal).slice(0, 5), (r) => r.idleGal + " gal", "bad") +
-      rankSection("💵 Eng qimmat CPM", [...wCpm].sort((a, b) => b.cpm - a.cpm).slice(0, 5), (r) => "$" + r.cpm + "/mi", "bad") +
-      rankSection("✅ Eng arzon CPM", [...wCpm].sort((a, b) => a.cpm - b.cpm).slice(0, 5), (r) => "$" + r.cpm + "/mi", "good");
+
+  async function loadRankReport(id) {
+    if (!id) { rankRows = []; renderRankTable(); return; }
+    const r = await (await fetch("/api/reports/" + id)).json();
+    rankRows = r.rows || [];
+    $("#rank-period").textContent = (r.periodStart || "?") + " → " + (r.periodEnd || "?") + " · " + rankRows.length + " unit";
+    renderRankTable();
   }
+
   window.initRanking = async function () {
-    if (computed && computed.rows && computed.rows.length) {
-      $("#rank-period").textContent = "Report: " + (period.start || "?") + " → " + (period.end || "?");
-      renderRanking(computed.rows);
-      return;
+    const sel = $("#rank-report");
+    if (!rankWired) {
+      rankWired = true;
+      sel.addEventListener("change", () => loadRankReport(sel.value));
+      $("#rank-by").addEventListener("change", (e) => { const [c, d] = e.target.value.split("|"); rankCol = c; rankDir = +d; renderRankTable(); });
+      document.querySelectorAll("#rank-table th[data-rcol]").forEach((th) => th.addEventListener("click", () => {
+        const c = th.dataset.rcol;
+        if (rankCol === c) rankDir = -rankDir; else { rankCol = c; rankDir = -1; }
+        renderRankTable();
+      }));
     }
     const list = await (await fetch("/api/reports")).json();
-    if (!list.length) { $("#rank-content").innerHTML = '<p class="cov-note">Avval Reports tab\'да report yarating yoki oching.</p>'; $("#rank-period").textContent = ""; return; }
-    const r = await (await fetch("/api/reports/" + list[0].id)).json();
-    computed = { rows: r.rows || [], unmatched: r.unmatched || [], totals: r.totals || {} };
-    period = { start: r.periodStart, end: r.periodEnd };
-    $("#rank-period").textContent = "Report: " + (period.start || "?") + " → " + (period.end || "?") + " (oxirgisi)";
-    renderRanking(computed.rows);
+    sel.innerHTML = list.map((r) => `<option value="${r.id}">${r.periodStart} → ${r.periodEnd} (${r.type})</option>`).join("");
+    if (!list.length) { rankRows = []; renderRankTable(); $("#rank-period").textContent = ""; return; }
+    let pick = list[0].id;
+    if (period.start) { const m = list.find((r) => r.periodStart === period.start && r.periodEnd === period.end); if (m) pick = m.id; }
+    sel.value = pick;
+    await loadRankReport(pick);
   };
 
   // ---- Wiring ----

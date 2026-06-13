@@ -206,8 +206,37 @@
     </div>
 
     <div id="view-ranking" class="hidden">
-      <p class="rep-period" id="rank-period" style="margin:0 0 12px"></p>
-      <div id="rank-content"></div>
+      <div class="rep-controls">
+        <label class="toggle">Period:
+          <select id="rank-report" class="rep-hsel" style="margin-left:6px;max-width:320px"></select>
+        </label>
+        <label class="toggle">Saralash:
+          <select id="rank-by" style="margin-left:6px">
+            <option value="mpg|-1">MPG (yaxshi → yomon)</option>
+            <option value="mpg|1">MPG (yomon → yaxshi)</option>
+            <option value="idleGal|-1">Idle gal (ko'p → kam)</option>
+            <option value="cpm|-1">CPM (qimmat → arzon)</option>
+            <option value="amt|-1">Xarajat (ko'p → kam)</option>
+            <option value="miles|-1">Miles (ko'p → kam)</option>
+          </select>
+        </label>
+        <span id="rank-period" class="rep-period"></span>
+      </div>
+      <div class="board" style="margin-top:8px">
+        <table class="idle-table rank-table" id="rank-table">
+          <thead><tr>
+            <th>#</th><th>Unit</th><th>Driver</th>
+            <th data-rcol="mpg">MPG</th>
+            <th data-rcol="idleGal">Idle gal</th>
+            <th data-rcol="cpm">CPM</th>
+            <th data-rcol="miles">Miles</th>
+            <th data-rcol="qty">Gallons</th>
+            <th data-rcol="amt">Cost</th>
+          </tr></thead>
+          <tbody id="rank-rows"></tbody>
+        </table>
+        <div id="rank-empty" class="empty hidden">Report yo'q</div>
+      </div>
     </div>
 
     <div id="view-coverage" class="hidden">

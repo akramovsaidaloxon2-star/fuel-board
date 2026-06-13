@@ -296,6 +296,10 @@ body.light .fuel-pct.full { color: var(--text); }
 .rank-val { font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 4px; }
 .rank-val.good { color: var(--full); }
 .rank-val.bad { color: var(--critical); }
+.rank-table th[data-rcol] { cursor: pointer; user-select: none; white-space: nowrap; }
+.rank-table th[data-rcol]:hover { color: var(--text); background: var(--surface-2); }
+.rank-table th.active { color: var(--accent); }
+.rank-pos { font-weight: 600; font-size: 15px; text-align: center; width: 44px; }
 @media (max-width: 640px) { .rep-uploads { grid-template-columns: 1fr; } }
 
 #map {
