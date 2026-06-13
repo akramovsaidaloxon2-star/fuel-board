@@ -28,11 +28,11 @@
   function render() {
     const tbody = $("#toll-rows");
     tbody.innerHTML = rows.map((r, i) => `<tr>
-      <td>${inp(i, "driver", "text", 150)}</td>
-      <td>${inp(i, "unit", "text", 56)}</td>
-      <td>${inp(i, "loadId", "text", 84)}</td>
-      <td>${inp(i, "date", "text", 78)}</td>
-      <td>${inp(i, "route", "text", 78)}</td>
+      <td>${inp(i, "driver", "text", 220)}</td>
+      <td>${inp(i, "unit", "text", 64)}</td>
+      <td>${inp(i, "loadId", "text", 120)}</td>
+      <td>${inp(i, "date", "text", 92)}</td>
+      <td>${inp(i, "route", "text", 110)}</td>
       <td>${inp(i, "tollCalc", "number", 64)}</td>
       <td>${inp(i, "givenDir", "number", 64)}</td>
       <td class="toll-auto" data-auto="ed-${i}">${r.tollCalc != null && r.givenDir != null ? money(r.tollCalc - r.givenDir) : ""}</td>
