@@ -19,24 +19,39 @@ const API_KEY = process.env.MOTIVE_API_KEY;
 const PORT = process.env.PORT || 3000;
 const MOTIVE_BASE = "https://api.gomotive.com";
 
-// Optional login. Set AUTH_USER + AUTH_PASS to require a username/password.
-const AUTH_USER = process.env.AUTH_USER || "";
+// Login with roles. Manager = full access; worker = Fuel board / Map / Idle only.
+const AUTH_USER = process.env.AUTH_USER || "";       // legacy single login = manager
 const AUTH_PASS = process.env.AUTH_PASS || "";
-const AUTH_ON = !!(AUTH_USER && AUTH_PASS);
+const MANAGER_USER = process.env.MANAGER_USER || "";
+const MANAGER_PASS = process.env.MANAGER_PASS || "";
+const WORKER_USER = process.env.WORKER_USER || "";
+const WORKER_PASS = process.env.WORKER_PASS || "";
+const AUTH_ON = !!(AUTH_USER && AUTH_PASS) || !!(MANAGER_USER && MANAGER_PASS) || !!(WORKER_USER && WORKER_PASS);
 
+function authRole(req) {
+  const m = (req.headers["authorization"] || "").match(/^Basic\s+(.+)$/i);
+  if (!m) return null;
+  const [u, p] = Buffer.from(m[1], "base64").toString("utf8").split(":");
+  if (MANAGER_USER && u === MANAGER_USER && p === MANAGER_PASS) return "manager";
+  if (AUTH_USER && u === AUTH_USER && p === AUTH_PASS) return "manager";
+  if (WORKER_USER && u === WORKER_USER && p === WORKER_PASS) return "worker";
+  return null;
+}
 function checkAuth(req, res) {
-  if (!AUTH_ON) return true; // no credentials configured -> open (local dev)
-  const hdr = req.headers["authorization"] || "";
-  const m = hdr.match(/^Basic\s+(.+)$/i);
-  if (m) {
-    const [u, p] = Buffer.from(m[1], "base64").toString("utf8").split(":");
-    if (u === AUTH_USER && p === AUTH_PASS) return true;
-  }
+  if (!AUTH_ON) { req._role = "manager"; return "manager"; } // open (local dev) -> full
+  const role = authRole(req);
+  if (role) { req._role = role; return role; }
   res.writeHead(401, {
-    "WWW-Authenticate": 'Basic realm="Fuel board", charset="UTF-8"',
+    "WWW-Authenticate": 'Basic realm="MOVEX", charset="UTF-8"',
     "Content-Type": "text/plain",
   });
   res.end("Authentication required");
+  return false;
+}
+function mgrOnly(req, res) {
+  if (req._role === "manager") return true;
+  res.writeHead(403, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: false, error: "forbidden" }));
   return false;
 }
 
@@ -548,6 +563,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (!checkAuth(req, res)) return;
+  if (req.url === "/api/me") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ role: req._role || "manager" }));
+    return;
+  }
   if (req.url === "/api/fuel" || req.url.startsWith("/api/fuel?")) {
     try {
       const data = await getFuelData();
@@ -558,6 +578,11 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
     }
     return;
+  }
+
+  // Reports, Toll, fuel-check and perf-auto are manager-only.
+  if (/^\/api\/(reports|toll|fuel-check|perf-auto)\b/.test(req.url)) {
+    if (!mgrOnly(req, res)) return;
   }
 
   // --- Reports API ---

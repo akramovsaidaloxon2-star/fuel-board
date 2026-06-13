@@ -361,6 +361,18 @@ applyTheme((() => { try { return localStorage.getItem("fuelboard-theme") || "dar
 
 $("#refresh").addEventListener("click", loadData);
 
+// Role-based access: workers only see Fuel board / Map / Idle report.
+fetch("/api/me").then((r) => r.json()).then((j) => {
+  if (j.role === "worker") {
+    ["reports", "ranking", "toll", "coverage"].forEach((v) => {
+      const b = document.querySelector(`.tab[data-view="${v}"]`);
+      if (b) b.remove();
+    });
+    const badge = document.querySelector(".subtitle");
+    if (badge) badge.textContent = "Worker view";
+  }
+}).catch(() => {});
+
 setupTabs();
 loadData();
 setInterval(loadData, 60000);
