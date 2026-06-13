@@ -132,6 +132,26 @@ function recordFuelPoint(unit, fuel, atISO) {
   saveFuelSeries();
 }
 
+// --- Daily odometer snapshots (for accurate per-period miles, going forward) ---
+const ODO_STORE = path.join(__dirname, "odo_daily.json");
+let odoDaily = {}; // { unit: { "YYYY-MM-DD": odometerMiles } }
+try { odoDaily = JSON.parse(fs.readFileSync(ODO_STORE, "utf8")); } catch { odoDaily = {}; }
+let odoTimer = null;
+function saveOdo() {
+  clearTimeout(odoTimer);
+  odoTimer = setTimeout(() => {
+    fs.writeFile(ODO_STORE, JSON.stringify(odoDaily), () => {});
+    ghSave("odo_daily.json", odoDaily);
+  }, 5000);
+}
+function recordOdo(unit, odo, atISO) {
+  if (!unit || typeof odo !== "number" || odo <= 0) return;
+  const day = (atISO ? new Date(atISO) : new Date()).toISOString().slice(0, 10);
+  if (!odoDaily[unit]) odoDaily[unit] = {};
+  odoDaily[unit][day] = Math.round(odo); // latest reading of the day wins
+  saveOdo();
+}
+
 // --- Helpers ---
 function statusFromSpeed(speed, ageMin) {
   if (ageMin > 720) return "Off duty"; // no update for >12h
@@ -227,6 +247,7 @@ function mapFleet(raw) {
     const unit = String(v.number || v.id).trim();
     const livePct = loc.fuel_primary_remaining_percentage;
     const ageMin = ageMinFrom(loc.located_at) ?? 99999;
+    if (loc.odometer != null && ageMin < 1440) recordOdo(unit, loc.odometer, loc.located_at);
 
     // Live fuel? Remember it as the last-known reading for this unit.
     let fuel = null, fuelSource = "none", fuelAt = null;
@@ -595,6 +616,8 @@ async function initDurable() {
   if (Array.isArray(r)) reports = r;
   const s = await ghLoad("fuel_series.json");
   if (s && typeof s === "object") fuelSeries = s;
+  const o = await ghLoad("odo_daily.json");
+  if (o && typeof o === "object") odoDaily = o;
   console.log(`  Durable store:       GitHub ${GH_REPO} ✓ (reports: ${reports.length})`);
 }
 
