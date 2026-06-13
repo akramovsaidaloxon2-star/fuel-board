@@ -44,6 +44,34 @@ Ikkalasini ham bepul ochish mumkin.
 
 ---
 
+## 2.5-bosqich — saqlangan reportlar yo'qolmasligi uchun (MUHIM)
+
+Bepul planda server uxlab qaytsa, **lokal disk tozalanadi** — shuning uchun
+saqlangan reportlar GitHub'dagi maxfiy repoga zaxiralanadi. Buni yoqish uchun:
+
+1. GitHub'da yana bitta **private** repo oching, masalan `fuel-board-data`
+   (bo'sh bo'lsa ham bo'ladi — server o'zi fayllarni yozadi).
+2. GitHub **Personal Access Token** oling:
+   - GitHub → Settings → Developer settings → **Personal access tokens**
+   - **Fine-grained token** → faqat `fuel-board-data` repo'siga ruxsat bering →
+     **Repository permissions → Contents: Read and write**.
+   - (Yoki classic token → `repo` ruxsati bilan.)
+   - Tokenni nusxa oling (faqat bir marta ko'rsatiladi).
+3. Render → Web Service → **Environment** → yana 2 ta qiymat qo'shing:
+
+   | Key | Value |
+   |-----|-------|
+   | `GH_REPO` | `sizning-username/fuel-board-data` |
+   | `GH_TOKEN` | (yuqorida olgan tokeningiz) |
+
+4. **Save** → server qayta deploy bo'ladi. Loglarda
+   `Durable store: GitHub <repo> ✓` chiqsa — zaxira ishlayapti.
+
+> Shundan keyin saqlangan har bir report avtomatik GitHub'ga yoziladi va
+> server qancha marta qayta ishga tushsa ham **yo'qolmaydi**.
+
+---
+
 ## 3-bosqich — ishxonadan kirish
 
 - Ishxona kompida brauzerda Render bergan URL'ni oching.
