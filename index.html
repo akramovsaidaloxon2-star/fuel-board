@@ -40,6 +40,7 @@
       <button class="tab active" data-view="board"><span class="tab-ic">⛽</span>Fuel board</button>
       <button class="tab" data-view="map"><span class="tab-ic">🗺️</span>Map</button>
       <button class="tab" data-view="idle"><span class="tab-ic">⏱️</span>Idle report</button>
+      <button class="tab" data-view="fuelstop"><span class="tab-ic">📍</span>Fuel stop</button>
       <button class="tab" data-view="reports"><span class="tab-ic">📊</span>Reports</button>
       <button class="tab" data-view="ranking"><span class="tab-ic">🏆</span>Ranking</button>
       <button class="tab" data-view="toll"><span class="tab-ic">🛣️</span>Toll</button>
@@ -347,6 +348,23 @@
         <div id="idle-empty" class="empty hidden">No idle data yet</div>
       </div>
     </div>
+
+    <div id="view-fuelstop" class="hidden">
+      <div class="cov-block">
+        <div class="cov-head">
+          <h2>Fuel stop — stansiyaga necha mil qoldi</h2>
+          <span class="fs-count" id="fs-count"></span>
+        </div>
+        <p class="cov-note">Unit tanlang va Pilot stansiya raqamini kiriting — truckning hozirgi joylashuvidan o'sha stansiyagacha <b>yo'l masofasi (mil)</b>, taxminiy vaqt, va hozirgi yoqilg'i yetadimi-yo'qmi ko'rsatiladi. Joylashuv Motive'dan, masofa OSRM yo'l routingidan.</p>
+        <div class="fs-form">
+          <input list="fs-units" id="fs-unit" placeholder="Unit (masalan 015)" autocomplete="off">
+          <datalist id="fs-units"></datalist>
+          <input type="text" id="fs-station" inputmode="numeric" placeholder="Pilot raqami (masalan 611)" autocomplete="off">
+          <button class="btn primary" id="fs-go">Hisobla</button>
+        </div>
+        <div id="fs-result"></div>
+      </div>
+    </div>
     </div><!-- /content-area -->
   </main>
 
@@ -362,5 +380,6 @@
   <script src="app.js"></script>
   <script src="reports.js"></script>
   <script src="toll.js"></script>
+  <script src="fuel-stop.js"></script>
 </body>
 </html>

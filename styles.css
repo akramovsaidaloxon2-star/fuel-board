@@ -505,3 +505,28 @@ footer {
   .stats { grid-template-columns: repeat(2, 1fr); }
   .controls input { min-width: 100%; }
 }
+
+/* --- Fuel stop --- */
+.fs-count { color: var(--text-dim); font-size: 13px; }
+.fs-form { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0 6px; }
+.fs-form input { background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 8px; padding: 11px 13px; font-size: 15px; min-width: 200px; }
+.fs-form input:focus { outline: none; border-color: var(--accent); }
+.fs-form .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; padding: 11px 22px; }
+.fs-msg { color: var(--text-dim); padding: 14px 2px; }
+.fs-msg.warn { color: var(--low); }
+.fs-card { margin-top: 16px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+.fs-miles { font-size: 17px; color: var(--text); margin-bottom: 16px; }
+.fs-big { font-size: 40px; font-weight: 800; color: var(--accent); }
+.fs-src { color: var(--text-mute); font-size: 13px; }
+.fs-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.fs-grid > div { display: flex; flex-direction: column; gap: 3px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+.fs-grid span { color: var(--text-mute); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+.fs-grid b { color: var(--text); font-size: 17px; }
+.fs-grid small { color: var(--text-dim); font-size: 12px; }
+.fs-badge { font-size: 16px; font-weight: 700; }
+.fs-badge.ok { color: var(--full); }
+.fs-badge.no { color: var(--critical); }
+.fs-link { display: inline-block; margin-top: 16px; color: var(--accent); text-decoration: none; font-size: 14px; }
+.fs-link:hover { text-decoration: underline; }
+@media (max-width: 700px) { .fs-grid { grid-template-columns: repeat(2, 1fr); } }

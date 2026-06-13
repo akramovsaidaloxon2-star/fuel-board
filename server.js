@@ -189,6 +189,31 @@ function getOdoMiles(unit, start, end) {
   return m > 0 ? Math.round(m) : null;
 }
 
+// --- Pilot fuel-station directory (store number -> coords), built once by scrape ---
+const STATIONS_STORE = path.join(__dirname, "stations.json");
+let stations = {};
+try { stations = JSON.parse(fs.readFileSync(STATIONS_STORE, "utf8")); } catch { stations = {}; }
+function haversineMiles(lat1, lon1, lat2, lon2) {
+  const R = 3958.8, toR = Math.PI / 180;
+  const dLat = (lat2 - lat1) * toR, dLon = (lon2 - lon1) * toR;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * toR) * Math.cos(lat2 * toR) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+// Road miles + ETA via the public OSRM demo server; falls back to straight-line.
+async function roadDistance(lat1, lon1, lat2, lon2) {
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=false`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (r.ok) {
+      const j = await r.json();
+      if (j.routes && j.routes[0]) {
+        return { miles: j.routes[0].distance / 1609.34, etaMin: Math.round(j.routes[0].duration / 60), source: "road" };
+      }
+    }
+  } catch (e) { /* fall through */ }
+  return { miles: haversineMiles(lat1, lon1, lat2, lon2), etaMin: null, source: "air" };
+}
+
 // --- Helpers ---
 function statusFromSpeed(speed, ageMin) {
   if (ageMin > 720) return "Off duty"; // no update for >12h
@@ -648,9 +673,57 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Reports, Toll, fuel-check and perf-auto are manager-only.
-  if (/^\/api\/(reports|toll|fuel-check|perf-auto)\b/.test(req.url)) {
+  // Reports, Toll, fuel-check, perf-auto and fuel-stop are manager-only.
+  if (/^\/api\/(reports|toll|fuel-check|perf-auto|fuel-stop)\b/.test(req.url)) {
     if (!mgrOnly(req, res)) return;
+  }
+
+  // --- Fuel stop: distance from a truck's live location to a Pilot station ---
+  if (req.url.startsWith("/api/fuel-stop")) {
+    const q = new URL(req.url, "http://x").searchParams;
+    if (q.get("list") === "1") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, count: Object.keys(stations).length }));
+      return;
+    }
+    const unit = (q.get("unit") || "").trim();
+    const num = (q.get("station") || "").trim().replace(/^#/, "");
+    const st = stations[num];
+    if (!st) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: `Pilot #${num} topilmadi (bazada ${Object.keys(stations).length} ta stansiya bor)` }));
+      return;
+    }
+    let data;
+    try { data = await getFuelData(); }
+    catch (e) { res.writeHead(502, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: String(e.message || e) })); return; }
+    const truck = data.fleet.find((x) => x.unit === unit);
+    if (!truck) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: `Unit ${unit} topilmadi` }));
+      return;
+    }
+    if (truck.lat == null || truck.lon == null) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: `Unit ${unit} hozir joylashuvini bermayapti (dvigatel o'chiq bo'lishi mumkin)` }));
+      return;
+    }
+    const dist = await roadDistance(truck.lat, truck.lon, st.lat, st.lon);
+    const miles = Math.round(dist.miles * 10) / 10;
+    const mpg = truck.mpg || null;
+    const tankGal = truck.tankGal || 150;
+    const gallonsRemaining = truck.fuel != null ? Math.round((truck.fuel / 100) * tankGal * 10) / 10 : null;
+    const rangeMiles = (gallonsRemaining != null && mpg) ? Math.round(gallonsRemaining * mpg) : null;
+    const fuelNeeded = mpg ? Math.round((miles / mpg) * 10) / 10 : null;
+    const enough = (rangeMiles != null) ? rangeMiles >= miles : null;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      ok: true,
+      station: { num, brand: st.brand, city: st.city, st: st.st, addr: st.addr, lat: st.lat, lon: st.lon },
+      truck: { unit: truck.unit, driver: truck.driver, location: truck.location, lat: truck.lat, lon: truck.lon, fuel: truck.fuel, mpg, gallonsRemaining, rangeMiles, tankGal },
+      miles, etaMin: dist.etaMin, source: dist.source, fuelNeeded, enough,
+    }));
+    return;
   }
 
   // --- Reports API ---
@@ -780,6 +853,7 @@ server.listen(PORT, () => {
   console.log(`  API endpoint:        http://localhost:${PORT}/api/fuel`);
   console.log(`  Motive key:          ${API_KEY ? "loaded ✓" : "MISSING ✗"}`);
   console.log(`  Login:               ${AUTH_ON ? `on (user: ${AUTH_USER}) ✓` : "OFF — set AUTH_USER/AUTH_PASS for cloud"}`);
+  console.log(`  Pilot stations:      ${Object.keys(stations).length} loaded`);
   console.log(`  Durable store:       ${GH_ON ? "configuring…" : "OFF — set GH_TOKEN/GH_REPO for permanence"}\n`);
   initDurable().catch((e) => console.error("initDurable", e.message));
 });
