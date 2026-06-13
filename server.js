@@ -227,7 +227,7 @@ function saveAssignments() {
   }, 800);
 }
 let fsBoardCache = { data: null, at: 0 };
-const FSBOARD_MS = 5 * 60 * 1000;
+const FSBOARD_MS = 50 * 1000; // ~50s so the 60s board poll always recomputes miles
 
 // Normalize a store number so "008", "8", "#8" all map to the same key.
 function normNum(s) {
