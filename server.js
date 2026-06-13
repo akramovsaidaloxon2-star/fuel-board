@@ -575,6 +575,15 @@ const server = http.createServer(async (req, res) => {
     });
     return;
   }
+  // Login-page background image (public — needed before the user is signed in).
+  if (req.url === "/login-bg.jpg") {
+    fs.readFile(path.join(__dirname, "login-bg.jpg"), (err, data) => {
+      if (err) { res.writeHead(404); res.end("Not found"); return; }
+      res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=86400" });
+      res.end(data);
+    });
+    return;
+  }
   // Validate credentials -> set a signed HttpOnly session cookie.
   if (req.url === "/api/login" && req.method === "POST") {
     const body = await readBody(req);

@@ -16,11 +16,11 @@
       min-height:100vh;display:flex;align-items:center;justify-content:center;
       position:relative;overflow:hidden;color:var(--ink);
     }
-    /* nature scene background */
-    .scene{position:fixed;inset:0;z-index:-2}
-    .scene svg{width:100%;height:100%;display:block}
+    /* real truck-at-dusk photo background */
+    .scene{position:fixed;inset:0;z-index:-2;
+      background:#1b2740 url('/login-bg.jpg') center/cover no-repeat}
     .overlay{position:fixed;inset:0;z-index:-1;
-      background:radial-gradient(120% 80% at 50% 0%,rgba(8,18,38,0) 40%,rgba(8,18,38,.35) 100%)}
+      background:linear-gradient(180deg,rgba(8,14,30,.30) 0%,rgba(8,14,30,.20) 45%,rgba(6,10,22,.55) 100%)}
 
     .card{
       width:min(92vw,400px);background:var(--card);
@@ -69,46 +69,7 @@
   </style>
 </head>
 <body>
-  <!-- nature / road scene -->
-  <div class="scene">
-    <svg viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#1b3a63"/>
-          <stop offset="42%" stop-color="#3a6ea5"/>
-          <stop offset="72%" stop-color="#e89b6b"/>
-          <stop offset="100%" stop-color="#f4c98a"/>
-        </linearGradient>
-        <linearGradient id="hill1" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#2c5a4a"/><stop offset="100%" stop-color="#16352b"/>
-        </linearGradient>
-        <linearGradient id="hill2" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#3f7d5f"/><stop offset="100%" stop-color="#255340"/>
-        </linearGradient>
-        <linearGradient id="road" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#5a6172"/><stop offset="100%" stop-color="#2a2f3b"/>
-        </linearGradient>
-      </defs>
-      <rect width="1440" height="900" fill="url(#sky)"/>
-      <!-- sun -->
-      <circle cx="720" cy="430" r="90" fill="#fff2d6" opacity="0.9"/>
-      <circle cx="720" cy="430" r="150" fill="#ffe9c2" opacity="0.25"/>
-      <!-- distant mountains -->
-      <path d="M0 470 L220 360 L430 460 L640 350 L860 470 L1080 370 L1280 460 L1440 400 L1440 560 L0 560 Z" fill="#6b86ad" opacity="0.55"/>
-      <!-- hills -->
-      <path d="M0 560 C300 470 520 540 760 520 C1010 500 1230 560 1440 520 L1440 900 L0 900 Z" fill="url(#hill2)"/>
-      <path d="M0 650 C260 590 560 690 820 650 C1080 610 1280 690 1440 640 L1440 900 L0 900 Z" fill="url(#hill1)"/>
-      <!-- road -->
-      <path d="M690 560 L750 560 L980 900 L420 900 Z" fill="url(#road)"/>
-      <!-- dashes -->
-      <g fill="#f4d35e" opacity="0.9">
-        <polygon points="716,585 724,585 726,612 714,612"/>
-        <polygon points="710,640 728,640 731,680 707,680"/>
-        <polygon points="701,705 737,705 742,760 696,760"/>
-        <polygon points="688,790 750,790 758,860 680,860"/>
-      </g>
-    </svg>
-  </div>
+  <div class="scene"></div>
   <div class="overlay"></div>
 
   <div class="card">

@@ -7,3 +7,6 @@ fuel_series.json
 reports_data.json
 toll_data.json
 *.log
+truck_raw.png
+truck_final.png
+_*.png
