@@ -84,15 +84,20 @@
 
   // ---- Render ----
   function render() {
-    const { rows, unmatched, totals } = computed;
+    const { rows, unmatched } = computed;
+    // Always recompute company totals from the rows (works for old + new saved reports).
+    const T = rows.reduce((a, r) => ({
+      qty: a.qty + (r.qty || 0), amt: a.amt + (r.amt || 0),
+      miles: a.miles + (r.miles || 0), idle: a.idle + (r.idleGal || 0),
+    }), { qty: 0, amt: 0, miles: 0, idle: 0 });
     $("#rep-stats").style.display = "grid";
     $("#rep-units").textContent = rows.length;
-    $("#rep-gal").textContent = fmt(totals.qty, 0);
-    $("#rep-cost").textContent = "$" + fmt(totals.amt, 0);
-    $("#rep-ppg").textContent = "$" + (totals.ppg ?? 0);
-    $("#rep-mpg").textContent = totals.mpg ?? "—";
-    $("#rep-cpm").textContent = "$" + (totals.cpm ?? 0);
-    $("#rep-idle").textContent = fmt(totals.idle, 0);
+    $("#rep-gal").textContent = fmt(T.qty, 0);
+    $("#rep-cost").textContent = "$" + fmt(T.amt, 0);
+    $("#rep-ppg").textContent = T.qty ? "$" + (T.amt / T.qty).toFixed(2) : "—";
+    $("#rep-mpg").textContent = T.qty ? (T.miles / T.qty).toFixed(2) : "—";
+    $("#rep-cpm").textContent = T.miles ? "$" + (T.amt / T.miles).toFixed(2) : "—";
+    $("#rep-idle").textContent = fmt(T.idle, 0);
 
     // low MPG list (< 6)
     const low = rows.filter((r) => r.mpg != null && r.mpg < 6).sort((a, b) => a.mpg - b.mpg);
