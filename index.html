@@ -40,6 +40,7 @@
       <button class="tab" data-view="map">Map</button>
       <button class="tab" data-view="idle">Idle report</button>
       <button class="tab" data-view="reports">Reports</button>
+      <button class="tab" data-view="ranking">Ranking</button>
       <button class="tab" data-view="coverage">Sensor coverage</button>
     </nav>
 
@@ -201,6 +202,11 @@
         <p class="cov-note">Har report sana bo'yicha saqlanadi. Ochish uchun bosing.</p>
         <div id="rep-history"></div>
       </div>
+    </div>
+
+    <div id="view-ranking" class="hidden">
+      <p class="rep-period" id="rank-period" style="margin:0 0 12px"></p>
+      <div id="rank-content"></div>
     </div>
 
     <div id="view-coverage" class="hidden">

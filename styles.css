@@ -293,6 +293,9 @@ body.light .fuel-pct.full { color: var(--text); }
 .rep-sortable th { cursor: pointer; user-select: none; white-space: nowrap; }
 .rep-sortable th:hover { color: var(--text); background: var(--surface-2); }
 .rep-sortable th .arrow { color: var(--accent); font-variant-numeric: tabular-nums; }
+.rank-val { font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 4px; }
+.rank-val.good { color: var(--full); }
+.rank-val.bad { color: var(--critical); }
 @media (max-width: 640px) { .rep-uploads { grid-template-columns: 1fr; } }
 
 #map {

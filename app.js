@@ -300,10 +300,12 @@ function setupTabs() {
       $("#view-idle").classList.toggle("hidden", view !== "idle");
       $("#view-map").classList.toggle("hidden", view !== "map");
       $("#view-reports").classList.toggle("hidden", view !== "reports");
+      $("#view-ranking").classList.toggle("hidden", view !== "ranking");
       if (view === "coverage") renderCoverage();
       if (view === "idle") renderIdle();
       if (view === "map") renderMap();
       if (view === "reports" && window.initReports) window.initReports();
+      if (view === "ranking" && window.initRanking) window.initRanking();
     });
   });
 }

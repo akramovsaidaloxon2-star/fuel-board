@@ -39,12 +39,16 @@
     const vi = hdr.findIndex((h) => /^Vehicle$/i.test(h.trim()));
     const di = hdr.findIndex((h) => /Total Distance/i.test(h));
     const ii = hdr.findIndex((h) => /Idled Fuel/i.test(h));
+    const dri = hdr.findIndex((h) => /^Driver$/i.test(h.trim()));
     const agg = {};
     for (let k = 1; k < lines.length; k++) {
       const c = lines[k].split(","); const v = (c[vi] || "").trim(); if (!v) continue;
-      if (!agg[v]) agg[v] = { miles: 0, idle: 0 };
-      agg[v].miles += parseFloat(c[di]) || 0;
+      const mi = parseFloat(c[di]) || 0;
+      if (!agg[v]) agg[v] = { miles: 0, idle: 0, driver: "", _dm: -1 };
+      agg[v].miles += mi;
       agg[v].idle += parseFloat(c[ii]) || 0;
+      const drv = (c[dri] || "").trim();
+      if (drv && mi > agg[v]._dm) { agg[v]._dm = mi; agg[v].driver = drv; } // primary driver = most miles
     }
     perfAgg = agg;
     $("#perf-name").textContent = file.name + " · " + Object.keys(agg).length + " unit";
@@ -73,7 +77,7 @@
         mpg = f.qty ? +(p.miles / f.qty).toFixed(2) : null;
         cpm = p.miles ? +(f.amt / p.miles).toFixed(2) : null;
       } else unmatched.push(u);
-      rows.push({ unit: u, qty: +f.qty.toFixed(2), amt: +f.amt.toFixed(2), ppg: ppg != null ? +ppg.toFixed(2) : null, miles, mpg, cpm, idleGal: idle });
+      rows.push({ unit: u, driver: (p && p.driver) || "", qty: +f.qty.toFixed(2), amt: +f.amt.toFixed(2), ppg: ppg != null ? +ppg.toFixed(2) : null, miles, mpg, cpm, idleGal: idle });
     });
     computed = { rows, unmatched, totals: {
       qty: +tQty.toFixed(1), amt: +tAmt.toFixed(2), idle: +tIdle.toFixed(1), miles: +tMiles.toFixed(1),
@@ -244,6 +248,42 @@
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Report");
     XLSX.writeFile(wb, `Fuel Report ${period.start || ""}_${period.end || ""}.xlsx`);
   }
+
+  // ---- Ranking ----
+  function rankSection(title, sorted, valueFn, cls) {
+    if (!sorted.length) return "";
+    return `<div class="cov-block"><div class="cov-head"><h2>${title}</h2></div><div class="cov-grid">` +
+      sorted.map((r, i) => `<div class="cov-item">
+        <span class="u">#${i + 1} · ${r.unit}</span>
+        <span class="m">${r.driver || "—"}</span>
+        <span class="rank-val ${cls}">${valueFn(r)}</span>
+      </div>`).join("") + `</div></div>`;
+  }
+  function renderRanking(rows) {
+    const wMpg = rows.filter((r) => r.mpg != null);
+    const wIdle = rows.filter((r) => r.idleGal != null);
+    const wCpm = rows.filter((r) => r.cpm != null);
+    $("#rank-content").innerHTML =
+      rankSection("🏆 Eng yaxshi MPG", [...wMpg].sort((a, b) => b.mpg - a.mpg).slice(0, 5), (r) => r.mpg + " MPG", "good") +
+      rankSection("🔻 Eng yomon MPG", [...wMpg].sort((a, b) => a.mpg - b.mpg).slice(0, 5), (r) => r.mpg + " MPG", "bad") +
+      rankSection("💧 Eng ko'p idle (behuda yoqilg'i)", [...wIdle].sort((a, b) => b.idleGal - a.idleGal).slice(0, 5), (r) => r.idleGal + " gal", "bad") +
+      rankSection("💵 Eng qimmat CPM", [...wCpm].sort((a, b) => b.cpm - a.cpm).slice(0, 5), (r) => "$" + r.cpm + "/mi", "bad") +
+      rankSection("✅ Eng arzon CPM", [...wCpm].sort((a, b) => a.cpm - b.cpm).slice(0, 5), (r) => "$" + r.cpm + "/mi", "good");
+  }
+  window.initRanking = async function () {
+    if (computed && computed.rows && computed.rows.length) {
+      $("#rank-period").textContent = "Report: " + (period.start || "?") + " → " + (period.end || "?");
+      renderRanking(computed.rows);
+      return;
+    }
+    const list = await (await fetch("/api/reports")).json();
+    if (!list.length) { $("#rank-content").innerHTML = '<p class="cov-note">Avval Reports tab\'да report yarating yoki oching.</p>'; $("#rank-period").textContent = ""; return; }
+    const r = await (await fetch("/api/reports/" + list[0].id)).json();
+    computed = { rows: r.rows || [], unmatched: r.unmatched || [], totals: r.totals || {} };
+    period = { start: r.periodStart, end: r.periodEnd };
+    $("#rank-period").textContent = "Report: " + (period.start || "?") + " → " + (period.end || "?") + " (oxirgisi)";
+    renderRanking(computed.rows);
+  };
 
   // ---- Wiring ----
   function setupDrop(dropId, inputId, handler) {
