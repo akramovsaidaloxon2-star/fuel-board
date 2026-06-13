@@ -214,6 +214,21 @@ async function roadDistance(lat1, lon1, lat2, lon2) {
   return { miles: haversineMiles(lat1, lon1, lat2, lon2), etaMin: null, source: "air" };
 }
 
+// --- Per-unit fuel-stop assignments (which Pilot station each truck is sent to) ---
+const ASSIGN_STORE = path.join(__dirname, "assignments.json");
+let assignments = {};
+try { assignments = JSON.parse(fs.readFileSync(ASSIGN_STORE, "utf8")); } catch { assignments = {}; }
+let assignTimer = null;
+function saveAssignments() {
+  clearTimeout(assignTimer);
+  assignTimer = setTimeout(() => {
+    fs.writeFile(ASSIGN_STORE, JSON.stringify(assignments), () => {});
+    ghSave("assignments.json", assignments);
+  }, 800);
+}
+let fsBoardCache = { data: null, at: 0 };
+const FSBOARD_MS = 5 * 60 * 1000;
+
 // --- Helpers ---
 function statusFromSpeed(speed, ageMin) {
   if (ageMin > 720) return "Off duty"; // no update for >12h
@@ -664,6 +679,7 @@ const server = http.createServer(async (req, res) => {
   if (req.url === "/api/fuel" || req.url.startsWith("/api/fuel?")) {
     try {
       const data = await getFuelData();
+      for (const r of data.fleet) r.assignedStop = assignments[r.unit] || null;
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(data));
     } catch (e) {
@@ -678,51 +694,63 @@ const server = http.createServer(async (req, res) => {
     if (!mgrOnly(req, res)) return;
   }
 
-  // --- Fuel stop: distance from a truck's live location to a Pilot station ---
-  if (req.url.startsWith("/api/fuel-stop")) {
-    const q = new URL(req.url, "http://x").searchParams;
-    if (q.get("list") === "1") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, count: Object.keys(stations).length }));
+  // --- Fuel stop: assign a Pilot station to a unit + per-unit miles-left board ---
+  // Assign / change a unit's fuel stop.
+  if (req.url === "/api/fuel-stop/assign" && req.method === "POST") {
+    const body = await readBody(req);
+    const unit = (body && body.unit || "").trim();
+    const num = (body && String(body.station || "")).trim().replace(/^#/, "");
+    if (!unit || !num) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "unit va station kerak" }));
       return;
     }
-    const unit = (q.get("unit") || "").trim();
-    const num = (q.get("station") || "").trim().replace(/^#/, "");
-    const st = stations[num];
-    if (!st) {
+    if (!stations[num]) {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: `Pilot #${num} topilmadi (bazada ${Object.keys(stations).length} ta stansiya bor)` }));
       return;
     }
-    let data;
-    try { data = await getFuelData(); }
-    catch (e) { res.writeHead(502, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: String(e.message || e) })); return; }
-    const truck = data.fleet.find((x) => x.unit === unit);
-    if (!truck) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: `Unit ${unit} topilmadi` }));
-      return;
-    }
-    if (truck.lat == null || truck.lon == null) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: `Unit ${unit} hozir joylashuvini bermayapti (dvigatel o'chiq bo'lishi mumkin)` }));
-      return;
-    }
-    const dist = await roadDistance(truck.lat, truck.lon, st.lat, st.lon);
-    const miles = Math.round(dist.miles * 10) / 10;
-    const mpg = truck.mpg || null;
-    const tankGal = truck.tankGal || 150;
-    const gallonsRemaining = truck.fuel != null ? Math.round((truck.fuel / 100) * tankGal * 10) / 10 : null;
-    const rangeMiles = (gallonsRemaining != null && mpg) ? Math.round(gallonsRemaining * mpg) : null;
-    const fuelNeeded = mpg ? Math.round((miles / mpg) * 10) / 10 : null;
-    const enough = (rangeMiles != null) ? rangeMiles >= miles : null;
+    assignments[unit] = num;
+    saveAssignments();
+    fsBoardCache = { data: null, at: 0 };
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({
-      ok: true,
-      station: { num, brand: st.brand, city: st.city, st: st.st, addr: st.addr, lat: st.lat, lon: st.lon },
-      truck: { unit: truck.unit, driver: truck.driver, location: truck.location, lat: truck.lat, lon: truck.lon, fuel: truck.fuel, mpg, gallonsRemaining, rangeMiles, tankGal },
-      miles, etaMin: dist.etaMin, source: dist.source, fuelNeeded, enough,
-    }));
+    res.end(JSON.stringify({ ok: true, unit, station: { num, ...stations[num] } }));
+    return;
+  }
+  // Clear a unit's fuel stop (e.g. once it has fueled).
+  if (req.url === "/api/fuel-stop/clear" && req.method === "POST") {
+    const body = await readBody(req);
+    const unit = (body && body.unit || "").trim();
+    if (assignments[unit]) { delete assignments[unit]; saveAssignments(); fsBoardCache = { data: null, at: 0 }; }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  // Miles-left to each assigned station (cached ~5 min so OSRM isn't hammered).
+  if (req.url.startsWith("/api/fuel-stop/board")) {
+    if (fsBoardCache.data && Date.now() - fsBoardCache.at < FSBOARD_MS) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(fsBoardCache.data));
+      return;
+    }
+    let data;
+    try { data = await getFuelData(); } catch (e) { data = { fleet: [] }; }
+    const out = {};
+    for (const unit of Object.keys(assignments)) {
+      const num = assignments[unit];
+      const stn = stations[num];
+      if (!stn) continue;
+      const truck = data.fleet.find((x) => x.unit === unit);
+      if (!truck || truck.lat == null || truck.lon == null) {
+        out[unit] = { station: num, brand: stn.brand, city: stn.city, st: stn.st, miles: null, error: "no-location" };
+        continue;
+      }
+      const dist = await roadDistance(truck.lat, truck.lon, stn.lat, stn.lon);
+      out[unit] = { station: num, brand: stn.brand, city: stn.city, st: stn.st, addr: stn.addr, lat: stn.lat, lon: stn.lon, miles: Math.round(dist.miles * 10) / 10, etaMin: dist.etaMin, source: dist.source };
+    }
+    fsBoardCache = { data: out, at: Date.now() };
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(out));
     return;
   }
 
@@ -845,6 +873,8 @@ async function initDurable() {
   if (o && typeof o === "object") odoDaily = o;
   const tl = await ghLoad("toll_data.json");
   if (Array.isArray(tl)) tollRows = tl;
+  const as = await ghLoad("assignments.json");
+  if (as && typeof as === "object" && !Array.isArray(as)) assignments = as;
   console.log(`  Durable store:       GitHub ${GH_REPO} ✓ (reports: ${reports.length})`);
 }
 

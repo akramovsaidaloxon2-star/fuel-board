@@ -1,6 +1,10 @@
 const $ = (sel) => document.querySelector(sel);
 let fleet = [];
 let live = false;
+let ROLE = "manager";          // set from /api/me
+let fsBoard = {};              // unit -> { station, miles, etaMin, ... } for assigned stops
+
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 function fuelClass(p) {
   if (p == null) return "none";
@@ -108,6 +112,22 @@ function render() {
     const idleCell = (idleH != null && idleH > 0)
       ? `<span class="idle ${idleH >= 5 ? "high" : idleH >= 2 ? "mid" : ""}">${idleH.toFixed(1)}h</span><div class="driver-meta">${r.idleGallons != null ? r.idleGallons.toFixed(1) + " gal" : ""}</div>`
       : `<span style="color:var(--text-mute)">—</span>`;
+
+    let fsCell;
+    if (r.assignedStop) {
+      const info = fsBoard[r.unit];
+      const miles = info && info.miles != null ? `${info.miles} mi`
+        : (info && info.error ? "no GPS" : "…");
+      const near = info && info.miles != null && info.miles <= 15;
+      const tip = info ? esc(`${info.brand || "Pilot"} #${r.assignedStop} · ${info.city || ""}, ${info.st || ""}`) : `Pilot #${r.assignedStop}`;
+      fsCell = `<div class="fs-assigned ${near ? "near" : ""}">
+          <span class="fs-pill" title="${tip}">📍 #${esc(r.assignedStop)}</span>
+          <span class="fs-mi">${miles}</span>
+          <button class="fs-clear" data-unit="${esc(r.unit)}" title="Tugatildi / tozalash">✕</button>
+        </div>`;
+    } else {
+      fsCell = `<input class="fs-inp" data-unit="${esc(r.unit)}" inputmode="numeric" placeholder="Pilot #" autocomplete="off">`;
+    }
     return `
       <tr>
         <td class="time-cell">${i + 1}</td>
@@ -126,6 +146,7 @@ function render() {
         <td>${idleCell}</td>
         <td class="time-cell ${stale ? "stale" : ""}">${formatUpdated(r.updated)}</td>
         <td><span class="status-badge ${statusClass(r.status)}">${r.status}</span></td>
+        <td class="col-fuelstop">${fsCell}</td>
         <td>
           ${r.phone ? `<button class="action-btn" data-unit="${r.unit}" data-act="call">Call</button>` : ""}
           <button class="action-btn" data-unit="${r.unit}" data-act="locate">Locate</button>
@@ -147,6 +168,46 @@ function render() {
       }
     });
   });
+
+  tbody.querySelectorAll(".fs-inp").forEach(inp => {
+    inp.addEventListener("keydown", e => { if (e.key === "Enter") assignStop(inp.dataset.unit, inp.value, inp); });
+  });
+  tbody.querySelectorAll(".fs-clear").forEach(b => {
+    b.addEventListener("click", () => clearStop(b.dataset.unit));
+  });
+}
+
+async function assignStop(unit, station, inp) {
+  station = String(station || "").replace(/^#/, "").trim();
+  if (!station) return;
+  if (inp) inp.disabled = true;
+  try {
+    const r = await fetch("/api/fuel-stop/assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unit, station }) });
+    const j = await r.json();
+    if (!j.ok) { alert(j.error || "Xato"); if (inp) { inp.disabled = false; inp.focus(); } return; }
+    const row = fleet.find(x => x.unit === unit);
+    if (row) row.assignedStop = station;
+    render();
+    loadFsBoard();
+  } catch (e) { alert("Xato: " + e.message); if (inp) inp.disabled = false; }
+}
+
+async function clearStop(unit) {
+  try {
+    await fetch("/api/fuel-stop/clear", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unit }) });
+    const row = fleet.find(x => x.unit === unit);
+    if (row) row.assignedStop = null;
+    delete fsBoard[unit];
+    render();
+  } catch (e) { alert("Xato: " + e.message); }
+}
+
+async function loadFsBoard() {
+  if (ROLE !== "manager") return;
+  try {
+    const r = await fetch("/api/fuel-stop/board");
+    if (r.ok) { fsBoard = await r.json(); render(); }
+  } catch {}
 }
 
 function renderCoverage() {
@@ -302,14 +363,12 @@ function setupTabs() {
       $("#view-reports").classList.toggle("hidden", view !== "reports");
       $("#view-ranking").classList.toggle("hidden", view !== "ranking");
       $("#view-toll").classList.toggle("hidden", view !== "toll");
-      $("#view-fuelstop").classList.toggle("hidden", view !== "fuelstop");
       if (view === "coverage") renderCoverage();
       if (view === "idle") renderIdle();
       if (view === "map") renderMap();
       if (view === "reports" && window.initReports) window.initReports();
       if (view === "ranking" && window.initRanking) window.initRanking();
       if (view === "toll" && window.initToll) window.initToll();
-      if (view === "fuelstop" && window.initFuelStop) window.initFuelStop();
     });
   });
 }
@@ -342,6 +401,7 @@ async function loadData() {
   if (!$("#view-coverage").classList.contains("hidden")) renderCoverage();
   if (!$("#view-idle").classList.contains("hidden")) renderIdle();
   if (!$("#view-map").classList.contains("hidden")) renderMap();
+  loadFsBoard();
 }
 
 $("#search").addEventListener("input", render);
@@ -369,15 +429,20 @@ if (logoutBtn) logoutBtn.addEventListener("click", async () => {
   window.location.href = "/login";
 });
 
-// Role-based access: workers only see Fuel board / Map / Idle report.
+// Role-based access: workers only see Fuel board / Map / Idle report,
+// and the manager-only Fuel stop column is hidden for them (CSS .role-worker).
 fetch("/api/me").then((r) => r.json()).then((j) => {
-  if (j.role === "worker") {
-    ["reports", "ranking", "toll", "coverage", "fuelstop"].forEach((v) => {
+  ROLE = j.role || "manager";
+  document.body.classList.toggle("role-worker", ROLE === "worker");
+  if (ROLE === "worker") {
+    ["reports", "ranking", "toll", "coverage"].forEach((v) => {
       const b = document.querySelector(`.tab[data-view="${v}"]`);
       if (b) b.remove();
     });
     const badge = document.querySelector(".subtitle");
     if (badge) badge.textContent = "Worker view";
+  } else {
+    loadFsBoard();
   }
 }).catch(() => {});
 
