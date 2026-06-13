@@ -361,6 +361,12 @@ applyTheme((() => { try { return localStorage.getItem("fuelboard-theme") || "dar
 
 $("#refresh").addEventListener("click", loadData);
 
+const logoutBtn = $("#logout");
+if (logoutBtn) logoutBtn.addEventListener("click", async () => {
+  try { await fetch("/api/logout", { method: "POST" }); } catch {}
+  window.location.href = "/login";
+});
+
 // Role-based access: workers only see Fuel board / Map / Idle report.
 fetch("/api/me").then((r) => r.json()).then((j) => {
   if (j.role === "worker") {

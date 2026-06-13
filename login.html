@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MOVEX · Login</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --navy:#0f2747; --navy2:#1b3a63; --red:#e23b2e; --ink:#0f2747;
+      --card:rgba(255,255,255,.92); --line:#d8e0ec; --muted:#5e6b80;
+    }
+    html,body{height:100%}
+    body{
+      font-family:'Segoe UI',Arial,Helvetica,sans-serif;
+      min-height:100vh;display:flex;align-items:center;justify-content:center;
+      position:relative;overflow:hidden;color:var(--ink);
+    }
+    /* nature scene background */
+    .scene{position:fixed;inset:0;z-index:-2}
+    .scene svg{width:100%;height:100%;display:block}
+    .overlay{position:fixed;inset:0;z-index:-1;
+      background:radial-gradient(120% 80% at 50% 0%,rgba(8,18,38,0) 40%,rgba(8,18,38,.35) 100%)}
+
+    .card{
+      width:min(92vw,400px);background:var(--card);
+      backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+      border:1px solid rgba(255,255,255,.6);
+      border-radius:20px;padding:38px 34px 32px;
+      box-shadow:0 24px 60px rgba(8,18,38,.35),0 2px 0 rgba(255,255,255,.5) inset;
+      animation:rise .5s cubic-bezier(.2,.8,.2,1);
+    }
+    @keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+
+    .logo{display:flex;justify-content:center;margin-bottom:6px}
+    .logo svg{height:46px;width:auto}
+    .ink{fill:var(--navy)} .red{fill:var(--red)}
+    .tag{text-align:center;color:var(--muted);font-size:13px;margin-bottom:26px;letter-spacing:.3px}
+    .tag b{color:var(--navy)}
+
+    label{display:block;font-size:12px;font-weight:700;color:var(--navy);
+      text-transform:uppercase;letter-spacing:.6px;margin:0 0 7px 2px}
+    .field{position:relative;margin-bottom:18px}
+    .field input{
+      width:100%;padding:13px 14px 13px 44px;font-size:15px;
+      border:1.5px solid var(--line);border-radius:11px;background:#fff;
+      color:var(--ink);transition:border-color .15s,box-shadow .15s;
+    }
+    .field input:focus{outline:none;border-color:var(--navy2);
+      box-shadow:0 0 0 4px rgba(27,58,99,.12)}
+    .field .ic{position:absolute;left:14px;top:38px;width:18px;height:18px;
+      fill:none;stroke:var(--muted);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+    .btn{
+      width:100%;padding:14px;border:none;border-radius:11px;cursor:pointer;
+      font-size:15px;font-weight:700;letter-spacing:.4px;color:#fff;
+      background:linear-gradient(135deg,var(--navy2),var(--navy));
+      box-shadow:0 8px 20px rgba(15,39,71,.32);transition:transform .1s,box-shadow .15s,filter .15s;
+    }
+    .btn:hover{filter:brightness(1.08)} .btn:active{transform:translateY(1px)}
+    .btn:disabled{opacity:.7;cursor:default}
+
+    .err{display:none;background:#fdecea;color:#b3261e;border:1px solid #f4c7c3;
+      border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:16px;text-align:center}
+    .err.show{display:block;animation:shake .35s}
+    @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+
+    .foot{text-align:center;margin-top:22px;font-size:11px;color:var(--muted);letter-spacing:.4px}
+  </style>
+</head>
+<body>
+  <!-- nature / road scene -->
+  <div class="scene">
+    <svg viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#1b3a63"/>
+          <stop offset="42%" stop-color="#3a6ea5"/>
+          <stop offset="72%" stop-color="#e89b6b"/>
+          <stop offset="100%" stop-color="#f4c98a"/>
+        </linearGradient>
+        <linearGradient id="hill1" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#2c5a4a"/><stop offset="100%" stop-color="#16352b"/>
+        </linearGradient>
+        <linearGradient id="hill2" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#3f7d5f"/><stop offset="100%" stop-color="#255340"/>
+        </linearGradient>
+        <linearGradient id="road" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#5a6172"/><stop offset="100%" stop-color="#2a2f3b"/>
+        </linearGradient>
+      </defs>
+      <rect width="1440" height="900" fill="url(#sky)"/>
+      <!-- sun -->
+      <circle cx="720" cy="430" r="90" fill="#fff2d6" opacity="0.9"/>
+      <circle cx="720" cy="430" r="150" fill="#ffe9c2" opacity="0.25"/>
+      <!-- distant mountains -->
+      <path d="M0 470 L220 360 L430 460 L640 350 L860 470 L1080 370 L1280 460 L1440 400 L1440 560 L0 560 Z" fill="#6b86ad" opacity="0.55"/>
+      <!-- hills -->
+      <path d="M0 560 C300 470 520 540 760 520 C1010 500 1230 560 1440 520 L1440 900 L0 900 Z" fill="url(#hill2)"/>
+      <path d="M0 650 C260 590 560 690 820 650 C1080 610 1280 690 1440 640 L1440 900 L0 900 Z" fill="url(#hill1)"/>
+      <!-- road -->
+      <path d="M690 560 L750 560 L980 900 L420 900 Z" fill="url(#road)"/>
+      <!-- dashes -->
+      <g fill="#f4d35e" opacity="0.9">
+        <polygon points="716,585 724,585 726,612 714,612"/>
+        <polygon points="710,640 728,640 731,680 707,680"/>
+        <polygon points="701,705 737,705 742,760 696,760"/>
+        <polygon points="688,790 750,790 758,860 680,860"/>
+      </g>
+    </svg>
+  </div>
+  <div class="overlay"></div>
+
+  <div class="card">
+    <div class="logo">
+      <svg viewBox="0 0 212 50" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="MOVEX">
+        <text x="0" y="37" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="40" letter-spacing="-1" class="ink">MOV</text>
+        <rect x="118" y="9" width="50" height="7" rx="1" class="ink"/>
+        <rect x="118" y="21.5" width="34" height="7" rx="1" class="red"/>
+        <polygon points="150,17 170,25 150,33" class="red"/>
+        <rect x="118" y="34" width="50" height="7" rx="1" class="ink"/>
+        <text x="174" y="37" font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="40" class="ink">X</text>
+      </svg>
+    </div>
+    <p class="tag"><b>Fuel Board</b> · Excellence in every journey</p>
+
+    <div id="err" class="err"></div>
+
+    <form id="form" autocomplete="on">
+      <div class="field">
+        <label for="user">Login</label>
+        <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+        <input id="user" name="username" type="text" placeholder="login" autocomplete="username" required autofocus>
+      </div>
+      <div class="field">
+        <label for="pass">Parol</label>
+        <svg class="ic" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+        <input id="pass" name="password" type="password" placeholder="••••••••" autocomplete="current-password" required>
+      </div>
+      <button id="submit" class="btn" type="submit">Kirish →</button>
+    </form>
+
+    <div class="foot">MOVEX FLEET · 2026</div>
+  </div>
+
+  <script>
+    const form = document.getElementById("form");
+    const err = document.getElementById("err");
+    const btn = document.getElementById("submit");
+    function fail(msg){ err.textContent = msg; err.classList.remove("show"); void err.offsetWidth; err.classList.add("show"); }
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      err.classList.remove("show");
+      btn.disabled = true; const old = btn.textContent; btn.textContent = "Tekshirilmoqda…";
+      try {
+        const res = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user: document.getElementById("user").value, pass: document.getElementById("pass").value }),
+        });
+        const j = await res.json();
+        if (j.ok) { window.location.href = "/"; return; }
+        fail(j.error || "Login yoki parol noto'g'ri");
+      } catch (ex) { fail("Ulanishda xato. Qayta urinib ko'ring."); }
+      btn.disabled = false; btn.textContent = old;
+    });
+  </script>
+</body>
+</html>

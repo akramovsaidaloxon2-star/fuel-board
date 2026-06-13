@@ -1,6 +1,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 // --- Load .env (no dependency) ---
 function loadEnv() {
@@ -28,25 +29,34 @@ const WORKER_USER = process.env.WORKER_USER || "";
 const WORKER_PASS = process.env.WORKER_PASS || "";
 const AUTH_ON = !!(AUTH_USER && AUTH_PASS) || !!(MANAGER_USER && MANAGER_PASS) || !!(WORKER_USER && WORKER_PASS);
 
-function authRole(req) {
-  const m = (req.headers["authorization"] || "").match(/^Basic\s+(.+)$/i);
-  if (!m) return null;
-  const [u, p] = Buffer.from(m[1], "base64").toString("utf8").split(":");
+// Validate a username/password -> role (used by the login form).
+function roleFor(u, p) {
   if (MANAGER_USER && u === MANAGER_USER && p === MANAGER_PASS) return "manager";
   if (AUTH_USER && u === AUTH_USER && p === AUTH_PASS) return "manager";
   if (WORKER_USER && u === WORKER_USER && p === WORKER_PASS) return "worker";
   return null;
 }
-function checkAuth(req, res) {
-  if (!AUTH_ON) { req._role = "manager"; return "manager"; } // open (local dev) -> full
-  const role = authRole(req);
-  if (role) { req._role = role; return role; }
-  res.writeHead(401, {
-    "WWW-Authenticate": 'Basic realm="MOVEX", charset="UTF-8"',
-    "Content-Type": "text/plain",
-  });
-  res.end("Authentication required");
-  return false;
+// Signed session cookie (no DB needed).
+const SESSION_SECRET = process.env.SESSION_SECRET || (MANAGER_PASS + WORKER_PASS + AUTH_PASS + "mvx-v1");
+function sign(s) { return crypto.createHmac("sha256", SESSION_SECRET).update(s).digest("base64url"); }
+function makeToken(role) { const p = role + "." + (Date.now() + 30 * 864e5); return p + "." + sign(p); }
+function verifyToken(tok) {
+  if (!tok) return null;
+  const parts = tok.split(".");
+  if (parts.length !== 3) return null;
+  const [role, exp, sig] = parts;
+  if (sign(role + "." + exp) !== sig) return null;
+  if (Date.now() > +exp) return null;
+  if (role !== "manager" && role !== "worker") return null;
+  return role;
+}
+function getCookie(req, name) {
+  const m = (req.headers.cookie || "").match(new RegExp("(?:^|; )" + name + "=([^;]+)"));
+  return m ? decodeURIComponent(m[1]) : null;
+}
+function sessionRole(req) {
+  if (!AUTH_ON) return "manager"; // open (local dev) -> full
+  return verifyToken(getCookie(req, "mvx_session"));
 }
 function mgrOnly(req, res) {
   if (req._role === "manager") return true;
@@ -555,14 +565,63 @@ const server = http.createServer(async (req, res) => {
     captureWebhook(req, res);
     return;
   }
+  // --- Auth (public login routes) ---
+  // Serve the custom login page.
+  if (req.url === "/login" || req.url.startsWith("/login?")) {
+    fs.readFile(path.join(__dirname, "login.html"), (err, data) => {
+      if (err) { res.writeHead(404); res.end("Not found"); return; }
+      res.writeHead(200, { "Content-Type": "text/html", "Cache-Control": "no-store" });
+      res.end(data);
+    });
+    return;
+  }
+  // Validate credentials -> set a signed HttpOnly session cookie.
+  if (req.url === "/api/login" && req.method === "POST") {
+    const body = await readBody(req);
+    const role = roleFor((body && body.user || "").trim(), (body && body.pass) || "");
+    if (!role) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Login yoki parol noto'g'ri" }));
+      return;
+    }
+    const tok = makeToken(role);
+    res.writeHead(200, {
+      "Content-Type": "application/json",
+      "Set-Cookie": `mvx_session=${tok}; HttpOnly; Path=/; Max-Age=${30 * 864e2}; SameSite=Lax`,
+    });
+    res.end(JSON.stringify({ ok: true, role }));
+    return;
+  }
+  // Clear the session cookie.
+  if (req.url === "/api/logout") {
+    res.writeHead(200, {
+      "Content-Type": "application/json",
+      "Set-Cookie": "mvx_session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax",
+    });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  // --- Cookie session gate (everything below requires a valid session) ---
+  const role = sessionRole(req);
+  if (!role) {
+    if (req.url.startsWith("/api/") || req.url === "/webhook/debug") {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "auth required" }));
+    } else {
+      res.writeHead(302, { Location: "/login" });
+      res.end();
+    }
+    return;
+  }
+  req._role = role;
+
   // Protected: inspect what Motive has been sending.
   if (req.url === "/webhook/debug") {
-    if (!checkAuth(req, res)) return;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ received: webhookCount, actionCounts, other: webhookOther, recent: webhookLog }, null, 2));
     return;
   }
-  if (!checkAuth(req, res)) return;
   if (req.url === "/api/me") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ role: req._role || "manager" }));
