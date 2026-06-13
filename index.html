@@ -36,13 +36,14 @@
 
   <main>
     <nav class="tabs">
-      <button class="tab active" data-view="board"><i class="ti"></i>Fuel board</button>
-      <button class="tab" data-view="map">Map</button>
-      <button class="tab" data-view="idle">Idle report</button>
-      <button class="tab" data-view="reports">Reports</button>
-      <button class="tab" data-view="ranking">Ranking</button>
-      <button class="tab" data-view="coverage">Sensor coverage</button>
+      <button class="tab active" data-view="board"><span class="tab-ic">⛽</span>Fuel board</button>
+      <button class="tab" data-view="map"><span class="tab-ic">🗺️</span>Map</button>
+      <button class="tab" data-view="idle"><span class="tab-ic">⏱️</span>Idle report</button>
+      <button class="tab" data-view="reports"><span class="tab-ic">📊</span>Reports</button>
+      <button class="tab" data-view="ranking"><span class="tab-ic">🏆</span>Ranking</button>
+      <button class="tab" data-view="coverage"><span class="tab-ic">📡</span>Sensor coverage</button>
     </nav>
+    <div class="content-area">
 
     <div id="view-board">
     <section class="stats">
@@ -325,6 +326,7 @@
         <div id="idle-empty" class="empty hidden">No idle data yet</div>
       </div>
     </div>
+    </div><!-- /content-area -->
   </main>
 
   <footer>
