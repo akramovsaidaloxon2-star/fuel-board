@@ -229,6 +229,22 @@ function saveAssignments() {
 let fsBoardCache = { data: null, at: 0 };
 const FSBOARD_MS = 5 * 60 * 1000;
 
+// Normalize a store number so "008", "8", "#8" all map to the same key.
+function normNum(s) {
+  s = String(s == null ? "" : s).trim().replace(/^#/, "");
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) ? String(n) : s;
+}
+
+// --- Daily Pilot fuel prices (uploaded from the "Better Of" price report) ---
+const PRICE_STORE = path.join(__dirname, "prices.json");
+let priceData = { date: null, updatedAt: null, prices: {} };
+try { const p = JSON.parse(fs.readFileSync(PRICE_STORE, "utf8")); if (p && p.prices) priceData = p; } catch {}
+function savePrices() {
+  fs.writeFile(PRICE_STORE, JSON.stringify(priceData), () => {});
+  ghSave("prices.json", priceData);
+}
+
 // --- Helpers ---
 function statusFromSpeed(speed, ageMin) {
   if (ageMin > 720) return "Off duty"; // no update for >12h
@@ -689,9 +705,31 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Reports, Toll, fuel-check, perf-auto and fuel-stop are manager-only.
-  if (/^\/api\/(reports|toll|fuel-check|perf-auto|fuel-stop)\b/.test(req.url)) {
+  // Reports, Toll, fuel-check, perf-auto, fuel-stop and fuel-price are manager-only.
+  if (/^\/api\/(reports|toll|fuel-check|perf-auto|fuel-stop|fuel-price)\b/.test(req.url)) {
     if (!mgrOnly(req, res)) return;
+  }
+
+  // --- Daily Pilot price: upload (parsed in-browser) + read ---
+  if (req.url === "/api/fuel-price" && req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(priceData));
+    return;
+  }
+  if (req.url === "/api/fuel-price" && req.method === "POST") {
+    const body = await readBody(req);
+    if (!body || typeof body.prices !== "object" || Array.isArray(body.prices)) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "prices object kerak" }));
+      return;
+    }
+    const norm = {};
+    for (const k in body.prices) norm[normNum(k)] = body.prices[k];
+    priceData = { date: body.date || null, updatedAt: new Date().toISOString(), prices: norm };
+    savePrices();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, count: Object.keys(norm).length, date: priceData.date }));
+    return;
   }
 
   // --- Fuel stop: assign a Pilot station to a unit + per-unit miles-left board ---
@@ -699,7 +737,7 @@ const server = http.createServer(async (req, res) => {
   if (req.url === "/api/fuel-stop/assign" && req.method === "POST") {
     const body = await readBody(req);
     const unit = (body && body.unit || "").trim();
-    const num = (body && String(body.station || "")).trim().replace(/^#/, "");
+    const num = normNum(body && body.station);
     if (!unit || !num) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "unit va station kerak" }));
@@ -875,6 +913,8 @@ async function initDurable() {
   if (Array.isArray(tl)) tollRows = tl;
   const as = await ghLoad("assignments.json");
   if (as && typeof as === "object" && !Array.isArray(as)) assignments = as;
+  const pr = await ghLoad("prices.json");
+  if (pr && pr.prices) priceData = pr;
   console.log(`  Durable store:       GitHub ${GH_REPO} ✓ (reports: ${reports.length})`);
 }
 

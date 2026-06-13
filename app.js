@@ -3,6 +3,14 @@ let fleet = [];
 let live = false;
 let ROLE = "manager";          // set from /api/me
 let fsBoard = {};              // unit -> { station, miles, etaMin, ... } for assigned stops
+let priceMap = {};             // normalized store# -> { your, retail, disc, sav, city, st }
+let priceDate = null;          // effective date of the loaded Pilot price report
+
+const normNum = (s) => {
+  s = String(s == null ? "" : s).trim().replace(/^#/, "");
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) ? String(n) : s;
+};
 
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -120,9 +128,12 @@ function render() {
         : (info && info.error ? "no GPS" : "…");
       const near = info && info.miles != null && info.miles <= 15;
       const tip = info ? esc(`${info.brand || "Pilot"} #${r.assignedStop} · ${info.city || ""}, ${info.st || ""}`) : `Pilot #${r.assignedStop}`;
+      const pr = priceMap[normNum(r.assignedStop)];
+      const priceHtml = pr && pr.your != null
+        ? `<span class="fs-price" title="Retail $${(+pr.retail).toFixed(2)} · save $${(+pr.sav).toFixed(2)}/gal">$${(+pr.your).toFixed(2)}</span>` : "";
       fsCell = `<div class="fs-assigned ${near ? "near" : ""}">
           <span class="fs-pill" title="${tip}">📍 #${esc(r.assignedStop)}</span>
-          <span class="fs-mi">${miles}</span>
+          <span class="fs-mi">${miles}</span>${priceHtml}
           <button class="fs-clear" data-unit="${esc(r.unit)}" title="Tugatildi / tozalash">✕</button>
         </div>`;
     } else {
@@ -178,7 +189,7 @@ function render() {
 }
 
 async function assignStop(unit, station, inp) {
-  station = String(station || "").replace(/^#/, "").trim();
+  station = normNum(station);
   if (!station) return;
   if (inp) inp.disabled = true;
   try {
@@ -208,6 +219,84 @@ async function loadFsBoard() {
     const r = await fetch("/api/fuel-stop/board");
     if (r.ok) { fsBoard = await r.json(); render(); }
   } catch {}
+}
+
+async function loadFuelPrice() {
+  if (ROLE !== "manager") return;
+  try {
+    const r = await fetch("/api/fuel-price");
+    if (!r.ok) return;
+    const j = await r.json();
+    priceMap = j.prices || {};
+    priceDate = j.date || null;
+    updatePriceLabel(Object.keys(priceMap).length);
+    render();
+  } catch {}
+}
+function updatePriceLabel(count) {
+  const el = $("#price-label");
+  if (el) el.textContent = count ? `Narx: ${priceDate || "—"} · ${count} stansiya` : "Narx yuklanmagan";
+}
+
+// Parse the Pilot "Better Of" price report (.xls/.xlsx) in the browser.
+function parsePriceWorkbook(wb) {
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+  let date = null;
+  for (const r of rows) {
+    const m = r.join(" ").match(/Effective Date:\s*([\d/]+)/i);
+    if (m) { date = m[1]; break; }
+  }
+  const hi = rows.findIndex(r => String(r[0]).trim().toLowerCase() === "site");
+  if (hi < 0) throw new Error("'Site' ustuni topilmadi — bu Pilot narx fayli emasmi?");
+  const head = rows[hi].map(c => String(c).trim().toLowerCase());
+  const col = (name) => head.findIndex(h => h.includes(name));
+  const cCity = col("city"), cSt = head.indexOf("st"), cProd = col("prod"),
+    cRetail = col("retail price"), cDisc = col("disc"), cYour = col("your price"), cSav = col("savings");
+  if (cYour < 0) throw new Error("'Your Price' ustuni topilmadi");
+  const prices = {};
+  for (let i = hi + 1; i < rows.length; i++) {
+    const r = rows[i];
+    const site = String(r[0]).trim();
+    if (!site) continue;
+    if (cProd >= 0 && String(r[cProd]).trim().toUpperCase() !== "DSL") continue; // diesel only
+    const your = parseFloat(r[cYour]);
+    if (!isFinite(your)) continue;
+    prices[site] = {
+      your: +your.toFixed(4),
+      retail: parseFloat(r[cRetail]) || null,
+      disc: parseFloat(r[cDisc]) || null,
+      sav: parseFloat(r[cSav]) || null,
+      city: String(cCity >= 0 ? r[cCity] : "").trim(),
+      st: String(cSt >= 0 ? r[cSt] : "").trim(),
+    };
+  }
+  return { date, prices };
+}
+
+async function uploadPriceFile(file) {
+  const btn = $("#price-upload-btn");
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = "O'qilmoqda…";
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: "array" });
+    const { date, prices } = parsePriceWorkbook(wb);
+    const n = Object.keys(prices).length;
+    if (!n) throw new Error("Narx topilmadi (DSL satrlari yo'q)");
+    btn.textContent = "Saqlanmoqda…";
+    const res = await fetch("/api/fuel-price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, prices }) });
+    const j = await res.json();
+    if (!j.ok) throw new Error(j.error || "Server xatosi");
+    await loadFuelPrice();
+    btn.textContent = `✓ ${j.count} ta narx · ${j.date || ""}`;
+    setTimeout(() => (btn.textContent = old), 2500);
+  } catch (e) {
+    alert("Narx yuklashda xato: " + e.message);
+    btn.textContent = old;
+  }
+  btn.disabled = false;
+  $("#price-file").value = "";
 }
 
 function renderCoverage() {
@@ -429,6 +518,11 @@ if (logoutBtn) logoutBtn.addEventListener("click", async () => {
   window.location.href = "/login";
 });
 
+const priceBtn = $("#price-upload-btn");
+if (priceBtn) priceBtn.addEventListener("click", () => $("#price-file").click());
+const priceFileInput = $("#price-file");
+if (priceFileInput) priceFileInput.addEventListener("change", (e) => { if (e.target.files[0]) uploadPriceFile(e.target.files[0]); });
+
 // Role-based access: workers only see Fuel board / Map / Idle report,
 // and the manager-only Fuel stop column is hidden for them (CSS .role-worker).
 fetch("/api/me").then((r) => r.json()).then((j) => {
@@ -443,6 +537,7 @@ fetch("/api/me").then((r) => r.json()).then((j) => {
     if (badge) badge.textContent = "Worker view";
   } else {
     loadFsBoard();
+    loadFuelPrice();
   }
 }).catch(() => {});
 

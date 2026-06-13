@@ -520,3 +520,9 @@ footer {
 .fs-clear { background: none; border: none; color: var(--text-mute); cursor: pointer; font-size: 13px;
   line-height: 1; padding: 2px 4px; border-radius: 4px; }
 .fs-clear:hover { color: var(--critical); background: var(--row-hover); }
+.fs-price { color: var(--full); font-weight: 700; font-size: 13px; }
+
+/* Pilot daily price upload bar (manager-only) */
+.price-bar { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; }
+.role-worker .price-bar { display: none; }
+.price-label { color: var(--text-dim); font-size: 13px; }
