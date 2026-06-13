@@ -151,6 +151,18 @@ function recordOdo(unit, odo, atISO) {
   odoDaily[unit][day] = Math.round(odo); // latest reading of the day wins
   saveOdo();
 }
+// Accurate period miles = odometer(end) - odometer(just before start). Needs snapshots.
+function getOdoMiles(unit, start, end) {
+  const days = odoDaily[unit];
+  if (!days) return null;
+  const dates = Object.keys(days).sort();
+  const endDate = dates.filter((d) => d <= end).pop();
+  let startDate = dates.filter((d) => d < start).pop();
+  if (!startDate) startDate = dates.filter((d) => d >= start && d <= end)[0]; // fallback: first day in range
+  if (!endDate || !startDate || endDate <= startDate) return null;
+  const m = days[endDate] - days[startDate];
+  return m > 0 ? Math.round(m) : null;
+}
 
 // --- Helpers ---
 function statusFromSpeed(speed, ageMin) {
@@ -584,6 +596,31 @@ const server = http.createServer(async (req, res) => {
     if (i >= 0) { reports.splice(i, 1); saveReports(); }
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  if (req.url.startsWith("/api/perf-auto")) {
+    const q = new URL(req.url, "http://x").searchParams;
+    const start = q.get("start"), end = q.get("end");
+    if (!start || !end) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: "start/end required" })); return; }
+    const idleByUnit = {};
+    try {
+      let page = 1, total = Infinity;
+      while ((page - 1) * 100 < total && page <= 10) {
+        const r = await fetch(`${MOTIVE_BASE}/v1/vehicle_utilization?start_date=${encodeURIComponent(start + "T00:00:00Z")}&end_date=${encodeURIComponent(end + "T23:59:59Z")}&per_page=100&page_no=${page}`, { headers: { "X-Api-Key": API_KEY } });
+        if (!r.ok) break;
+        const j = await r.json();
+        const rolls = j.vehicle_idle_rollups || [];
+        rolls.forEach((w) => { const v = w.vehicle_idle_rollup; const num = String(v.vehicle.number).trim(); idleByUnit[num] = +(v.idle_fuel || 0).toFixed(2); });
+        total = j.pagination ? j.pagination.total : 0;
+        if (!rolls.length) break; page++;
+      }
+    } catch (e) { /* idle optional */ }
+    const units = {};
+    const all = new Set([...Object.keys(idleByUnit), ...Object.keys(odoDaily)]);
+    all.forEach((u) => { units[u] = { miles: getOdoMiles(u, start, end), idle: idleByUnit[u] != null ? idleByUnit[u] : null }; });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, start, end, units }));
     return;
   }
 

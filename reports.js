@@ -55,6 +55,24 @@
     $("#drop-perf").classList.add("ok");
   }
 
+  async function autoFetch(btn) {
+    if (!period.start) { alert("Avval Fuel report (Excel) yuklang — davr o'shandan aniqlanadi."); return; }
+    const old = btn.textContent; btn.textContent = "Motive'dan olinmoqda…"; btn.disabled = true;
+    try {
+      const res = await fetch(`/api/perf-auto?start=${period.start}&end=${period.end}`);
+      const j = await res.json();
+      if (!j.ok) throw new Error(j.error || "auto error");
+      const agg = {};
+      Object.keys(j.units).forEach((u) => { agg[u] = { miles: j.units[u].miles, idle: j.units[u].idle, driver: "" }; });
+      perfAgg = agg;
+      const withMiles = Object.values(agg).filter((x) => x.miles != null).length;
+      $("#perf-name").textContent = `Motive (avto) · ${Object.keys(agg).length} unit · ${withMiles} ta miles bilan`;
+      $("#drop-perf").classList.add("ok");
+      if (!withMiles) warn("Motive idle keldi, lekin miles hali yo'q (odometer tarixi bugundan yig'ilmoqda — keyingi haftadan miles ham bo'ladi). Hozir miles uchun CSV yuklang.");
+    } catch (e) { alert("Xato: " + e.message); }
+    btn.textContent = old; btn.disabled = false;
+  }
+
   // ---- Compute ----
   function lookupPerf(unit) {
     if (perfAgg[unit]) return perfAgg[unit];
@@ -72,11 +90,15 @@
       const ppg = f.qty ? f.amt / f.qty : null;
       tQty += f.qty; tAmt += f.amt;
       let miles = null, mpg = null, cpm = null, idle = null;
-      if (p) {
-        miles = +p.miles.toFixed(1); idle = +p.idle.toFixed(2); tIdle += p.idle; tMiles += p.miles;
-        mpg = f.qty ? +(p.miles / f.qty).toFixed(2) : null;
-        cpm = p.miles ? +(f.amt / p.miles).toFixed(2) : null;
-      } else unmatched.push(u);
+      const pm = p && p.miles != null ? p.miles : null;
+      const pi = p && p.idle != null ? p.idle : null;
+      if (pm != null) {
+        miles = +pm.toFixed(1); tMiles += pm;
+        mpg = f.qty ? +(pm / f.qty).toFixed(2) : null;
+        cpm = pm > 0 ? +(f.amt / pm).toFixed(2) : null;
+      }
+      if (pi != null) { idle = +pi.toFixed(2); tIdle += pi; }
+      if (pm == null) unmatched.push(u);
       rows.push({ unit: u, driver: (p && p.driver) || "", qty: +f.qty.toFixed(2), amt: +f.amt.toFixed(2), ppg: ppg != null ? +ppg.toFixed(2) : null, miles, mpg, cpm, idleGal: idle });
     });
     computed = { rows, unmatched, totals: {
@@ -300,6 +322,7 @@
     setupDrop("#drop-fuel", "#file-fuel", parseFuel);
     setupDrop("#drop-perf", "#file-perf", parsePerf);
     $("#rep-generate").addEventListener("click", generate);
+    $("#rep-auto").addEventListener("click", (e) => autoFetch(e.currentTarget));
     $("#rep-save").addEventListener("click", save);
     $("#rep-export").addEventListener("click", exportXlsx);
     $("#rep-history-select").addEventListener("change", (e) => openSaved(e.target.value));
