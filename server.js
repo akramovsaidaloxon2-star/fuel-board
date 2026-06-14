@@ -526,6 +526,23 @@ function saveToll() {
   fs.writeFile(TOLL_STORE, JSON.stringify(tollRows), () => {});
   ghSave("toll_data.json", tollRows);
 }
+// Public read-only CSV of the toll board (token-gated) for a Google Sheets =IMPORTDATA share.
+const TOLL_CSV_KEY = process.env.TOLL_CSV_KEY || crypto.createHmac("sha256", SESSION_SECRET).update("toll-csv-v1").digest("hex").slice(0, 20);
+function csvCell(v) {
+  if (v == null) return "";
+  const s = String(v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function tollToCsv(rows) {
+  const head = ["Driver", "Unit", "Load ID", "Date", "From>To", "Toll calc", "Given dir", "Est diff", "Status", "DH", "Dispatched", "Directed", "Extra", "Driven", "Total Driven", "Driven toll", "Charge"];
+  const lines = [head.join(",")];
+  for (const r of rows || []) {
+    const est = (r.tollCalc != null && r.givenDir != null) ? (r.tollCalc - r.givenDir) : "";
+    const extra = (r.directed != null && r.dispatched != null) ? (r.directed - r.dispatched) : "";
+    lines.push([r.driver, r.unit, r.loadId, r.date, r.route, r.tollCalc, r.givenDir, est, r.status, r.dh, r.dispatched, r.directed, extra, r.driven, r.totalDriven, r.drivenToll, r.charge].map(csvCell).join(","));
+  }
+  return lines.join("\n");
+}
 function readBody(req) {
   return new Promise((resolve) => {
     let b = "";
@@ -653,6 +670,19 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=86400" });
       res.end(data);
     });
+    return;
+  }
+  // Public read-only toll report as CSV (token in the URL) — for a Google Sheets
+  // =IMPORTDATA() share so other companies can view it without a login.
+  if (req.url.startsWith("/api/toll.csv")) {
+    const key = new URL(req.url, "http://x").searchParams.get("key");
+    if (!TOLL_CSV_KEY || key !== TOLL_CSV_KEY) {
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      res.end("forbidden");
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "text/csv; charset=utf-8", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
+    res.end(tollToCsv(tollRows));
     return;
   }
   // Validate credentials -> set a signed HttpOnly session cookie.
