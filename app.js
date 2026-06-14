@@ -406,11 +406,20 @@ function renderMap() {
   if (!window.L) return;
   if (!mapObj) {
     mapObj = L.map("map", { zoomControl: true }).setView([39.5, -98.35], 4);
+    // Clean Google-Maps-like road map (sharp retina tiles, interstate shields + labels)
+    const road = L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", { maxZoom: 20, detectRetina: true, subdomains: "abcd", attribution: "&copy; OpenStreetMap &copy; CARTO" });
     const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, attribution: "Esri, Maxar" });
-    const streets = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap" });
-    const labels = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19 });
-    sat.addTo(mapObj); labels.addTo(mapObj);
-    L.control.layers({ "Satellite": sat, "Streets": streets }, { "Place labels": labels }, { position: "topright" }).addTo(mapObj);
+    // Roads + place names overlay (so Satellite can also show interstates/labels)
+    const roadsLabels = L.layerGroup([
+      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19 }),
+      L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19 }),
+    ]);
+    road.addTo(mapObj); // default: clean road map
+    L.control.layers(
+      { "Yo'l xaritasi": road, "Sun'iy yo'ldosh": sat },
+      { "Yo'llar + nomlar": roadsLabels },
+      { position: "topright", collapsed: false }
+    ).addTo(mapObj);
     markersLayer = L.markerClusterGroup
       ? L.markerClusterGroup({ maxClusterRadius: 45, spiderfyOnMaxZoom: true })
       : L.layerGroup();
