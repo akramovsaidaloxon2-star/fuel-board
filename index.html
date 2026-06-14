@@ -253,6 +253,19 @@
       <div class="rep-controls">
         <button class="btn" id="toll-add">➕ Qator qo'shish</button>
         <button class="btn" id="toll-save">💾 Saqlash</button>
+        <span class="toll-sep"></span>
+        <button class="btn" id="toll-xls">⬇️ Excel</button>
+        <button class="btn" id="toll-pdf">⬇️ PDF</button>
+        <span class="toll-sep"></span>
+        <select id="toll-rep-type" title="Report turi">
+          <option value="weekly">Haftalik</option>
+          <option value="monthly">Oylik</option>
+        </select>
+        <input id="toll-rep-label" placeholder="Report nomi (masalan: June 2026)" style="width:190px">
+        <button class="btn" id="toll-rep-save">📅 Reportga saqlash</button>
+        <span class="toll-sep"></span>
+        <select id="toll-rep-sel" title="Saqlangan reportlar"><option value="__live">🔴 Live board</option></select>
+        <button class="btn" id="toll-rep-del" title="Tanlangan reportni o'chirish">🗑️</button>
         <span id="toll-totals" class="rep-period"></span>
       </div>
       <div class="board" style="overflow-x:auto">
@@ -366,6 +379,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
   <script src="data.js"></script>
   <script src="app.js"></script>
   <script src="reports.js"></script>

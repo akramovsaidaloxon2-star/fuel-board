@@ -6,6 +6,7 @@ fuel_cache.json
 fuel_series.json
 reports_data.json
 toll_data.json
+toll_reports_data.json
 odo_daily.json
 assignments.json
 prices.json

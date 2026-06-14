@@ -543,6 +543,15 @@ function tollToCsv(rows) {
   }
   return lines.join("\n");
 }
+
+// --- Saved toll reports (weekly/monthly snapshots), durable like fuel reports ---
+const TOLLREP_STORE = path.join(__dirname, "toll_reports_data.json");
+let tollReports = [];
+try { tollReports = JSON.parse(fs.readFileSync(TOLLREP_STORE, "utf8")); } catch { tollReports = []; }
+function saveTollReports() {
+  fs.writeFile(TOLLREP_STORE, JSON.stringify(tollReports), () => {});
+  ghSave("toll_reports_data.json", tollReports);
+}
 function readBody(req) {
   return new Promise((resolve) => {
     let b = "";
@@ -920,6 +929,51 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // --- Saved toll reports (weekly/monthly snapshots) ---
+  const tollRepMatch = req.url.match(/^\/api\/toll-reports\/([\w-]+)$/);
+  if (req.url === "/api/toll-reports" && req.method === "GET") {
+    const list = tollReports.map((r) => ({ id: r.id, type: r.type, label: r.label, periodStart: r.periodStart, periodEnd: r.periodEnd, createdAt: r.createdAt, count: r.rows ? r.rows.length : 0 }))
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(list));
+    return;
+  }
+  if (req.url === "/api/toll-reports" && req.method === "POST") {
+    const body = await readBody(req);
+    if (!body || !Array.isArray(body.rows)) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "rows required" }));
+      return;
+    }
+    const rec = {
+      id: "t" + Date.now().toString(36),
+      type: body.type === "monthly" ? "monthly" : "weekly",
+      label: (body.label || "").trim(),
+      periodStart: body.periodStart || null,
+      periodEnd: body.periodEnd || null,
+      createdAt: new Date().toISOString(),
+      rows: body.rows,
+    };
+    tollReports.push(rec);
+    saveTollReports();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, id: rec.id }));
+    return;
+  }
+  if (tollRepMatch && req.method === "GET") {
+    const r = tollReports.find((x) => x.id === tollRepMatch[1]);
+    res.writeHead(r ? 200 : 404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(r || { ok: false, error: "not found" }));
+    return;
+  }
+  if (tollRepMatch && req.method === "DELETE") {
+    const i = tollReports.findIndex((x) => x.id === tollRepMatch[1]);
+    if (i >= 0) { tollReports.splice(i, 1); saveTollReports(); }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
   if (req.url.startsWith("/api/perf-auto")) {
     const q = new URL(req.url, "http://x").searchParams;
     const start = q.get("start"), end = q.get("end");
@@ -982,6 +1036,8 @@ async function initDurable() {
   if (as && typeof as === "object" && !Array.isArray(as)) { assignments = as; migrateAssignments(); }
   const pr = await ghLoad("prices.json");
   if (pr && pr.prices) priceData = pr;
+  const tr = await ghLoad("toll_reports_data.json");
+  if (Array.isArray(tr)) tollReports = tr;
   console.log(`  Durable store:       GitHub ${GH_REPO} ✓ (reports: ${reports.length})`);
 }
 

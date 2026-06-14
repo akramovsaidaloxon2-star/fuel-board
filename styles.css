@@ -543,6 +543,11 @@ footer {
 .fs-clear:hover { color: var(--critical); background: var(--row-hover); }
 .fs-price { color: var(--full); font-weight: 700; font-size: 13px; }
 
+/* Toll controls: separators + selects */
+.toll-sep { display: inline-block; width: 1px; height: 22px; background: var(--border); margin: 0 3px; vertical-align: middle; }
+#toll-rep-type, #toll-rep-sel, #toll-rep-label { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 7px 8px; font-size: 13px; }
+#toll-rep-type:focus, #toll-rep-sel:focus, #toll-rep-label:focus { outline: none; border-color: var(--accent); }
+
 /* Pilot daily price upload bar (manager-only) */
 .price-bar { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; }
 .role-worker .price-bar { display: none; }
