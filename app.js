@@ -5,6 +5,7 @@ let ROLE = "manager";          // set from /api/me
 let fsBoard = {};              // unit -> { station, miles, etaMin, ... } for assigned stops
 let priceMap = {};             // normalized store# -> { your, retail, disc, sav, city, st }
 let priceDate = null;          // effective date of the loaded Pilot price report
+const BRANDS = { pilot: "Pilot", loves: "Love's", ta: "TA/Petro" };
 
 const normNum = (s) => {
   s = String(s == null ? "" : s).trim().replace(/^#/, "");
@@ -123,21 +124,30 @@ function render() {
 
     let fsCell;
     if (r.assignedStop) {
+      const a = r.assignedStop;                 // { brand, num }
+      const label = BRANDS[a.brand] || a.brand;
       const info = fsBoard[r.unit];
       const miles = info && info.miles != null ? `${info.miles} mi`
         : (info && info.error ? "no GPS" : "…");
       const near = info && info.miles != null && info.miles <= 15;
-      const tip = info ? esc(`${info.brand || "Pilot"} #${r.assignedStop} · ${info.city || ""}, ${info.st || ""}`) : `Pilot #${r.assignedStop}`;
-      const pr = priceMap[normNum(r.assignedStop)];
+      const tip = info ? esc(`${info.name || label} #${a.num} · ${info.city || ""}, ${info.st || ""}`) : `${label} #${a.num}`;
+      const pr = a.brand === "pilot" ? priceMap[normNum(a.num)] : null;
       const priceHtml = pr && pr.your != null
         ? `<span class="fs-price" title="Retail $${(+pr.retail).toFixed(2)} · save $${(+pr.sav).toFixed(2)}/gal">$${(+pr.your).toFixed(2)}</span>` : "";
       fsCell = `<div class="fs-assigned ${near ? "near" : ""}">
-          <span class="fs-pill" title="${tip}">📍 #${esc(r.assignedStop)}</span>
+          <span class="fs-pill brand-${a.brand}" title="${tip}">${label} #${esc(a.num)}</span>
           <span class="fs-mi">${miles}</span>${priceHtml}
           <button class="fs-clear" data-unit="${esc(r.unit)}" title="Tugatildi / tozalash">✕</button>
         </div>`;
     } else {
-      fsCell = `<input class="fs-inp" data-unit="${esc(r.unit)}" inputmode="numeric" placeholder="Pilot #" autocomplete="off">`;
+      fsCell = `<div class="fs-assign-form">
+          <select class="fs-brand" data-unit="${esc(r.unit)}">
+            <option value="pilot">Pilot</option>
+            <option value="loves">Love's</option>
+            <option value="ta">TA/Petro</option>
+          </select>
+          <input class="fs-inp" data-unit="${esc(r.unit)}" inputmode="numeric" placeholder="#" autocomplete="off">
+        </div>`;
     }
     return `
       <tr>
@@ -181,23 +191,28 @@ function render() {
   });
 
   tbody.querySelectorAll(".fs-inp").forEach(inp => {
-    inp.addEventListener("keydown", e => { if (e.key === "Enter") assignStop(inp.dataset.unit, inp.value, inp); });
+    inp.addEventListener("keydown", e => {
+      if (e.key !== "Enter") return;
+      const form = inp.closest(".fs-assign-form");
+      const brand = form ? form.querySelector(".fs-brand").value : "pilot";
+      assignStop(inp.dataset.unit, brand, inp.value, inp);
+    });
   });
   tbody.querySelectorAll(".fs-clear").forEach(b => {
     b.addEventListener("click", () => clearStop(b.dataset.unit));
   });
 }
 
-async function assignStop(unit, station, inp) {
+async function assignStop(unit, brand, station, inp) {
   station = normNum(station);
   if (!station) return;
   if (inp) inp.disabled = true;
   try {
-    const r = await fetch("/api/fuel-stop/assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unit, station }) });
+    const r = await fetch("/api/fuel-stop/assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unit, brand, station }) });
     const j = await r.json();
     if (!j.ok) { alert(j.error || "Xato"); if (inp) { inp.disabled = false; inp.focus(); } return; }
     const row = fleet.find(x => x.unit === unit);
-    if (row) row.assignedStop = station;
+    if (row) row.assignedStop = { brand, num: station };
     render();
     loadFsBoard();
   } catch (e) { alert("Xato: " + e.message); if (inp) inp.disabled = false; }

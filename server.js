@@ -189,10 +189,15 @@ function getOdoMiles(unit, start, end) {
   return m > 0 ? Math.round(m) : null;
 }
 
-// --- Pilot fuel-station directory (store number -> coords), built once by scrape ---
-const STATIONS_STORE = path.join(__dirname, "stations.json");
-let stations = {};
-try { stations = JSON.parse(fs.readFileSync(STATIONS_STORE, "utf8")); } catch { stations = {}; }
+// --- Fuel-station directories (store number -> coords) per brand, built by scrapers ---
+function loadStations(file) { try { return JSON.parse(fs.readFileSync(path.join(__dirname, file), "utf8")); } catch { return {}; } }
+const brandStations = {
+  pilot: loadStations("stations.json"),
+  loves: loadStations("loves.json"),
+  ta: loadStations("ta.json"),
+};
+const BRAND_LABELS = { pilot: "Pilot", loves: "Love's", ta: "TA/Petro" };
+const stations = brandStations.pilot; // legacy alias (Pilot price lookups, etc.)
 function haversineMiles(lat1, lon1, lat2, lon2) {
   const R = 3958.8, toR = Math.PI / 180;
   const dLat = (lat2 - lat1) * toR, dLon = (lon2 - lon1) * toR;
@@ -217,7 +222,17 @@ async function roadDistance(lat1, lon1, lat2, lon2) {
 // --- Per-unit fuel-stop assignments (which Pilot station each truck is sent to) ---
 const ASSIGN_STORE = path.join(__dirname, "assignments.json");
 let assignments = {};
+// Normalize to { unit: { brand, num } }; migrate legacy string values (= Pilot).
+function migrateAssignments() {
+  for (const u in assignments) {
+    const v = assignments[u];
+    if (typeof v === "string") assignments[u] = { brand: "pilot", num: normNum(v) };
+    else if (v && v.num) assignments[u] = { brand: v.brand || "pilot", num: normNum(v.num) };
+    else delete assignments[u];
+  }
+}
 try { assignments = JSON.parse(fs.readFileSync(ASSIGN_STORE, "utf8")); } catch { assignments = {}; }
+migrateAssignments();
 let assignTimer = null;
 function saveAssignments() {
   clearTimeout(assignTimer);
@@ -737,22 +752,24 @@ const server = http.createServer(async (req, res) => {
   if (req.url === "/api/fuel-stop/assign" && req.method === "POST") {
     const body = await readBody(req);
     const unit = (body && body.unit || "").trim();
+    const brand = (body && body.brand) || "pilot";
+    const dir = brandStations[brand];
     const num = normNum(body && body.station);
-    if (!unit || !num) {
+    if (!unit || !num || !dir) {
       res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "unit va station kerak" }));
+      res.end(JSON.stringify({ ok: false, error: "unit, brand va station kerak" }));
       return;
     }
-    if (!stations[num]) {
+    if (!dir[num]) {
       res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: `Pilot #${num} topilmadi (bazada ${Object.keys(stations).length} ta stansiya bor)` }));
+      res.end(JSON.stringify({ ok: false, error: `${BRAND_LABELS[brand] || brand} #${num} topilmadi (bazada ${Object.keys(dir).length} ta)` }));
       return;
     }
-    assignments[unit] = num;
+    assignments[unit] = { brand, num };
     saveAssignments();
     fsBoardCache = { data: null, at: 0 };
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, unit, station: { num, ...stations[num] } }));
+    res.end(JSON.stringify({ ok: true, unit, brand, station: { num, ...dir[num] } }));
     return;
   }
   // Clear a unit's fuel stop (e.g. once it has fueled).
@@ -775,16 +792,17 @@ const server = http.createServer(async (req, res) => {
     try { data = await getFuelData(); } catch (e) { data = { fleet: [] }; }
     const out = {};
     for (const unit of Object.keys(assignments)) {
-      const num = assignments[unit];
-      const stn = stations[num];
+      const a = assignments[unit];
+      const stn = (brandStations[a.brand] || {})[a.num];
       if (!stn) continue;
+      const base = { brand: a.brand, brandLabel: BRAND_LABELS[a.brand] || a.brand, station: a.num, name: stn.brand, city: stn.city, st: stn.st };
       const truck = data.fleet.find((x) => x.unit === unit);
       if (!truck || truck.lat == null || truck.lon == null) {
-        out[unit] = { station: num, brand: stn.brand, city: stn.city, st: stn.st, miles: null, error: "no-location" };
+        out[unit] = { ...base, miles: null, error: "no-location" };
         continue;
       }
       const dist = await roadDistance(truck.lat, truck.lon, stn.lat, stn.lon);
-      out[unit] = { station: num, brand: stn.brand, city: stn.city, st: stn.st, addr: stn.addr, lat: stn.lat, lon: stn.lon, miles: Math.round(dist.miles * 10) / 10, etaMin: dist.etaMin, source: dist.source };
+      out[unit] = { ...base, addr: stn.addr, lat: stn.lat, lon: stn.lon, miles: Math.round(dist.miles * 10) / 10, etaMin: dist.etaMin, source: dist.source };
     }
     fsBoardCache = { data: out, at: Date.now() };
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -912,7 +930,7 @@ async function initDurable() {
   const tl = await ghLoad("toll_data.json");
   if (Array.isArray(tl)) tollRows = tl;
   const as = await ghLoad("assignments.json");
-  if (as && typeof as === "object" && !Array.isArray(as)) assignments = as;
+  if (as && typeof as === "object" && !Array.isArray(as)) { assignments = as; migrateAssignments(); }
   const pr = await ghLoad("prices.json");
   if (pr && pr.prices) priceData = pr;
   console.log(`  Durable store:       GitHub ${GH_REPO} ✓ (reports: ${reports.length})`);
@@ -923,7 +941,7 @@ server.listen(PORT, () => {
   console.log(`  API endpoint:        http://localhost:${PORT}/api/fuel`);
   console.log(`  Motive key:          ${API_KEY ? "loaded ✓" : "MISSING ✗"}`);
   console.log(`  Login:               ${AUTH_ON ? `on (user: ${AUTH_USER}) ✓` : "OFF — set AUTH_USER/AUTH_PASS for cloud"}`);
-  console.log(`  Pilot stations:      ${Object.keys(stations).length} loaded`);
+  console.log(`  Stations:            Pilot ${Object.keys(brandStations.pilot).length} · Love's ${Object.keys(brandStations.loves).length} · TA/Petro ${Object.keys(brandStations.ta).length}`);
   console.log(`  Durable store:       ${GH_ON ? "configuring…" : "OFF — set GH_TOKEN/GH_REPO for permanence"}\n`);
   initDurable().catch((e) => console.error("initDurable", e.message));
 });

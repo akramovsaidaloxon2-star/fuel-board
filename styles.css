@@ -506,15 +506,21 @@ footer {
   .controls input { min-width: 100%; }
 }
 
-/* --- Fuel stop column (assign a Pilot station per unit) --- */
+/* --- Fuel stop column (assign a station per unit, multi-brand) --- */
 .role-worker .col-fuelstop { display: none; }   /* manager-only column */
-.fs-inp { width: 86px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
-  border-radius: 6px; padding: 6px 8px; font-size: 13px; }
+.fs-assign-form { display: flex; align-items: center; gap: 4px; }
+.fs-brand { background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 6px; padding: 5px 4px; font-size: 12px; max-width: 86px; }
+.fs-brand:focus { outline: none; border-color: var(--accent); }
+.fs-inp { width: 58px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 6px; padding: 6px 7px; font-size: 13px; }
 .fs-inp:focus { outline: none; border-color: var(--accent); background: var(--surface); }
 .fs-inp::placeholder { color: var(--text-mute); }
 .fs-assigned { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .fs-pill { background: var(--accent); color: #fff; font-weight: 600; font-size: 12px;
   padding: 3px 8px; border-radius: 999px; }
+.fs-pill.brand-loves { background: #c8860a; }
+.fs-pill.brand-ta { background: #138a72; }
 .fs-mi { color: var(--text); font-size: 13px; font-weight: 600; }
 .fs-assigned.near .fs-mi { color: var(--full); }
 .fs-clear { background: none; border: none; color: var(--text-mute); cursor: pointer; font-size: 13px;
