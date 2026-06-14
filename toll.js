@@ -13,6 +13,13 @@
   const num = (n) => (n == null || isNaN(n)) ? "" : Number(n).toFixed(1);
   const esc = (v) => String(v == null ? "" : v).replace(/"/g, "&quot;");
 
+  // Estimated difference per row. Like the report, a load only earns soft saving when it was
+  // FOLLOWED — NOT FOLLOWED / SKIPPED loads count as $0. Returns null when not computable yet.
+  function estOf(r) {
+    if (r.status === "NOT FOLLOWED" || r.status === "SKIPPED") return 0;
+    return (r.tollCalc != null && r.givenDir != null) ? (r.tollCalc - r.givenDir) : null;
+  }
+
   function inp(i, f, type, w) { const v = rows[i][f] == null ? "" : rows[i][f]; return `<input data-i="${i}" data-f="${f}" type="${type}" value="${esc(v)}" style="width:${w}px" ${ro ? "disabled" : ""}>`; }
   function statusSel(i, v) {
     const cls = v === "FOLLOWED" ? "ok" : (v === "NOT FOLLOWED" || v === "SKIPPED") ? "no" : "";
@@ -22,7 +29,7 @@
 
   // Flat row in the exact report column order, with computed est-diff and extra.
   function rowArray(r) {
-    const est = (r.tollCalc != null && r.givenDir != null) ? (r.tollCalc - r.givenDir) : "";
+    const est = estOf(r);
     const extra = (r.directed != null && r.dispatched != null) ? (r.directed - r.dispatched) : "";
     return [r.driver, r.unit, r.loadId, r.date, r.route, r.tollCalc, r.givenDir, est, r.status, r.dh, r.dispatched, r.directed, extra, r.driven, r.totalDriven, r.drivenToll, r.charge].map((v) => (v == null ? "" : v));
   }
@@ -32,41 +39,68 @@
     let charge = 0, est = 0, foll = 0, notf = 0, skip = 0;
     rows.forEach((r) => {
       if (r.charge != null) charge += +r.charge || 0;
-      if (r.tollCalc != null && r.givenDir != null) est += (r.tollCalc - r.givenDir);
+      { const e = estOf(r); if (e != null) est += e; }
       if (r.status === "FOLLOWED") foll++; else if (r.status === "NOT FOLLOWED") notf++; else if (r.status === "SKIPPED") skip++;
     });
     const ctx = curId && curId !== "__live" ? `📅 ${curLabel} (saqlangan) · ` : "";
     $("#toll-totals").textContent = `${ctx}${rows.length} qator · ✓ ${foll} followed · ⚠️ ${notf} not followed · ⏭️ ${skip} skipped · Est.diff $${est.toFixed(0)} · Charge $${charge.toFixed(0)}`;
-    renderSoftIfOpen();
+    renderFoot();
   }
 
-  // --- Soft saving (matches the bottom of the report's main toll sheet) ---
+  // --- TOTAL + soft saving footer (rendered at the bottom of the board, like the report) ---
   // Extra Miles ($) = total Extra mile × 1.5 ; Soft saving = total Estimated difference − Extra Miles ($).
   const fmt2 = (n) => (n == null || isNaN(n)) ? "0" : (Math.round(n * 100) / 100).toLocaleString("en-US", { maximumFractionDigits: 2 });
   const fmoney = (n) => (n == null || isNaN(n)) ? "$0.00" : "$" + (Math.round(n * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+  // Per-column sums + the derived soft-saving figures, over the current rows.
   function softTotals() {
-    let estDiff = 0, extraMiles = 0, charge = 0;
+    const s = { tollCalc: 0, givenDir: 0, estDiff: 0, dh: 0, dispatched: 0, directed: 0, extraMiles: 0, driven: 0, totalDriven: 0, drivenToll: 0, charge: 0 };
     rows.forEach((r) => {
-      if (r.tollCalc != null && r.givenDir != null) estDiff += (r.tollCalc - r.givenDir);
-      if (r.directed != null && r.dispatched != null) extraMiles += (r.directed - r.dispatched);
-      if (r.charge != null) charge += (+r.charge || 0);
+      if (r.tollCalc != null) s.tollCalc += +r.tollCalc || 0;
+      if (r.givenDir != null) s.givenDir += +r.givenDir || 0;
+      { const e = estOf(r); if (e != null) s.estDiff += e; }
+      if (r.dh != null) s.dh += +r.dh || 0;
+      if (r.dispatched != null) s.dispatched += +r.dispatched || 0;
+      if (r.directed != null) s.directed += +r.directed || 0;
+      if (r.directed != null && r.dispatched != null) s.extraMiles += (r.directed - r.dispatched);
+      if (r.driven != null) s.driven += +r.driven || 0;
+      if (r.totalDriven != null) s.totalDriven += +r.totalDriven || 0;
+      if (r.drivenToll != null) s.drivenToll += +r.drivenToll || 0;
+      if (r.charge != null) s.charge += +r.charge || 0;
     });
-    const extraDollars = extraMiles * EXTRA_MILE_RATE;   // Extra Miles ($)
-    const softSaving = estDiff - extraDollars;           // Expected soft saving
-    return { estDiff, extraMiles, extraDollars, softSaving, softSavingUnfollowed: softSaving - charge, charge };
+    s.extraDollars = s.extraMiles * EXTRA_MILE_RATE;       // Extra Miles ($)
+    s.softSaving = s.estDiff - s.extraDollars;             // Expected soft saving
+    s.softSavingUnfollowed = s.softSaving - s.charge;      // ... with unfollowed (minus charges)
+    return s;
   }
 
-  function renderSoft() {
+  function renderFoot() {
+    const foot = $("#toll-foot");
+    if (!foot) return;
+    if (!rows.length) { foot.innerHTML = ""; return; }
     const t = softTotals();
-    const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
-    set("#soft-est", fmt2(t.estDiff));
-    set("#soft-extra", fmt2(t.extraMiles) + " mi");
-    set("#soft-extra-d", fmoney(t.extraDollars));
-    set("#soft-save", fmoney(t.softSaving));
-    set("#soft-save-unf", fmoney(t.softSavingUnfollowed));
+    foot.innerHTML = `
+      <tr class="toll-total-row">
+        <td>TOTAL</td><td></td><td></td><td></td><td></td>
+        <td>${fmoney(t.tollCalc)}</td><td>${fmoney(t.givenDir)}</td><td>${fmoney(t.estDiff)}</td>
+        <td></td>
+        <td>${fmt2(t.dh)}</td><td>${fmt2(t.dispatched)}</td><td>${fmt2(t.directed)}</td><td>${fmt2(t.extraMiles)}</td>
+        <td>${fmt2(t.driven)}</td><td>${fmt2(t.totalDriven)}</td><td>${fmoney(t.drivenToll)}</td><td>${fmoney(t.charge)}</td>
+        <td></td>
+      </tr>
+      <tr class="toll-foot-x">
+        <td colspan="12" class="r">Extra Miles ($) = Extra mile × 1.5</td>
+        <td>${fmoney(t.extraDollars)}</td>
+        <td colspan="5"></td>
+      </tr>
+      <tr class="toll-foot-soft">
+        <td colspan="5" class="r">Expected soft saving:</td>
+        <td colspan="2">${fmoney(t.softSaving)}</td>
+        <td colspan="4" class="r">Expected soft saving with unfollowed:</td>
+        <td colspan="2">${fmoney(t.softSavingUnfollowed)}</td>
+        <td colspan="5"></td>
+      </tr>`;
   }
-  function renderSoftIfOpen() { const p = $("#toll-soft-panel"); if (p && !p.classList.contains("hidden")) renderSoft(); }
 
   function render() {
     const tbody = $("#toll-rows");
@@ -78,7 +112,7 @@
       <td>${inp(i, "route", "text", 110)}</td>
       <td>${inp(i, "tollCalc", "number", 64)}</td>
       <td>${inp(i, "givenDir", "number", 64)}</td>
-      <td class="toll-auto" data-auto="ed-${i}">${r.tollCalc != null && r.givenDir != null ? money(r.tollCalc - r.givenDir) : ""}</td>
+      <td class="toll-auto" data-auto="ed-${i}">${estOf(r) != null ? money(estOf(r)) : ""}</td>
       <td>${statusSel(i, r.status)}</td>
       <td>${inp(i, "dh", "number", 56)}</td>
       <td>${inp(i, "dispatched", "number", 76)}</td>
@@ -105,7 +139,7 @@
     if (el.type === "number") v = v === "" ? null : parseFloat(v);
     rows[i][f] = v;
     const r = rows[i];
-    if (f === "tollCalc" || f === "givenDir") { const c = document.querySelector(`[data-auto="ed-${i}"]`); if (c) c.textContent = r.tollCalc != null && r.givenDir != null ? money(r.tollCalc - r.givenDir) : ""; }
+    if (f === "tollCalc" || f === "givenDir" || f === "status") { const c = document.querySelector(`[data-auto="ed-${i}"]`); if (c) { const e = estOf(r); c.textContent = e != null ? money(e) : ""; } }
     if (f === "directed" || f === "dispatched") { const c = document.querySelector(`[data-auto="ex-${i}"]`); if (c) c.textContent = r.directed != null && r.dispatched != null ? num(r.directed - r.dispatched) : ""; }
     if (f === "status") el.className = "toll-status " + (v === "FOLLOWED" ? "ok" : (v === "NOT FOLLOWED" || v === "SKIPPED") ? "no" : "");
     totals();
@@ -128,14 +162,17 @@
     const t = softTotals();
     const total = new Array(HEADERS.length).fill("");
     total[0] = "TOTAL";
-    total[7] = round2(t.estDiff);       // under "Estimated difference"
-    total[12] = round2(t.extraMiles);   // under "Extra mile"
+    total[5] = round2(t.tollCalc); total[6] = round2(t.givenDir); total[7] = round2(t.estDiff);
+    total[9] = round2(t.dh); total[10] = round2(t.dispatched); total[11] = round2(t.directed); total[12] = round2(t.extraMiles);
+    total[13] = round2(t.driven); total[14] = round2(t.totalDriven); total[15] = round2(t.drivenToll); total[16] = round2(t.charge);
+    const xtra = new Array(HEADERS.length).fill("");
+    xtra[11] = "Extra Miles ($) = Extra mile × 1.5"; xtra[12] = round2(t.extraDollars);
     return [
       [],
       total,
-      ["Extra Miles ($) = Extra Miles × 1.5", round2(t.extraDollars)],
-      ["Expected soft saving (Est.diff − Extra Miles $)", round2(t.softSaving)],
-      ["Expected soft saving with unfollowed", round2(t.softSavingUnfollowed)],
+      xtra,
+      ["Expected soft saving:", round2(t.softSaving)],
+      ["Expected soft saving with unfollowed:", round2(t.softSavingUnfollowed)],
     ];
   }
   function exportExcel() {
@@ -225,12 +262,6 @@
       $("#toll-save").addEventListener("click", (e) => save(e.currentTarget));
       $("#toll-xls").addEventListener("click", exportExcel);
       $("#toll-pdf").addEventListener("click", exportPdf);
-      $("#toll-soft-btn").addEventListener("click", (e) => {
-        const p = $("#toll-soft-panel"), show = p.classList.contains("hidden");
-        p.classList.toggle("hidden");
-        e.currentTarget.classList.toggle("active", show);
-        if (show) { renderSoft(); p.scrollIntoView({ behavior: "smooth", block: "start" }); }
-      });
       $("#toll-rep-save").addEventListener("click", (e) => saveReport(e.currentTarget));
       $("#toll-rep-del").addEventListener("click", deleteSelected);
       $("#toll-rep-sel").addEventListener("change", (e) => openSelected(e.target.value));
