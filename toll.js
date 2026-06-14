@@ -5,6 +5,9 @@
   // Exact column headers from the Fastmover toll report (1:1).
   const HEADERS = ["Driver", "Unit", "Load ID", "Date", "From > To", "Toll calculator", "Given direction", "Estimated difference", "Status", "DH", "Dispatched mile", "Directed mile", "Extra mile", "Driven mile", "Total Driven Mile", "Driven toll", "Charge"];
 
+  // Soft saving constants (from the bottom of the report's main toll sheet).
+  const EXTRA_MILE_RATE = 1.5;    // Extra Miles ($) = Extra Miles × 1.5
+
   function blank() { return { driver: "", unit: "", loadId: "", date: "", route: "", tollCalc: null, givenDir: null, status: "", dh: null, dispatched: null, directed: null, driven: null, totalDriven: null, drivenToll: null, charge: null }; }
   const money = (n) => (n == null || isNaN(n)) ? "" : "$" + Number(n).toFixed(2);
   const num = (n) => (n == null || isNaN(n)) ? "" : Number(n).toFixed(1);
@@ -34,7 +37,36 @@
     });
     const ctx = curId && curId !== "__live" ? `📅 ${curLabel} (saqlangan) · ` : "";
     $("#toll-totals").textContent = `${ctx}${rows.length} qator · ✓ ${foll} followed · ⚠️ ${notf} not followed · ⏭️ ${skip} skipped · Est.diff $${est.toFixed(0)} · Charge $${charge.toFixed(0)}`;
+    renderSoftIfOpen();
   }
+
+  // --- Soft saving (matches the bottom of the report's main toll sheet) ---
+  // Extra Miles ($) = total Extra mile × 1.5 ; Soft saving = total Estimated difference − Extra Miles ($).
+  const fmt2 = (n) => (n == null || isNaN(n)) ? "0" : (Math.round(n * 100) / 100).toLocaleString("en-US", { maximumFractionDigits: 2 });
+  const fmoney = (n) => (n == null || isNaN(n)) ? "$0.00" : "$" + (Math.round(n * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  function softTotals() {
+    let estDiff = 0, extraMiles = 0, charge = 0;
+    rows.forEach((r) => {
+      if (r.tollCalc != null && r.givenDir != null) estDiff += (r.tollCalc - r.givenDir);
+      if (r.directed != null && r.dispatched != null) extraMiles += (r.directed - r.dispatched);
+      if (r.charge != null) charge += (+r.charge || 0);
+    });
+    const extraDollars = extraMiles * EXTRA_MILE_RATE;   // Extra Miles ($)
+    const softSaving = estDiff - extraDollars;           // Expected soft saving
+    return { estDiff, extraMiles, extraDollars, softSaving, softSavingUnfollowed: softSaving - charge, charge };
+  }
+
+  function renderSoft() {
+    const t = softTotals();
+    const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+    set("#soft-est", fmt2(t.estDiff));
+    set("#soft-extra", fmt2(t.extraMiles) + " mi");
+    set("#soft-extra-d", fmoney(t.extraDollars));
+    set("#soft-save", fmoney(t.softSaving));
+    set("#soft-save-unf", fmoney(t.softSavingUnfollowed));
+  }
+  function renderSoftIfOpen() { const p = $("#toll-soft-panel"); if (p && !p.classList.contains("hidden")) renderSoft(); }
 
   function render() {
     const tbody = $("#toll-rows");
@@ -90,8 +122,24 @@
   }
 
   // --- Excel / PDF export (exact report columns) ---
+  const round2 = (n) => Math.round(n * 100) / 100;
+  // Soft-saving block appended to the bottom of the board sheet, like the report.
+  function softSummaryRows() {
+    const t = softTotals();
+    const total = new Array(HEADERS.length).fill("");
+    total[0] = "TOTAL";
+    total[7] = round2(t.estDiff);       // under "Estimated difference"
+    total[12] = round2(t.extraMiles);   // under "Extra mile"
+    return [
+      [],
+      total,
+      ["Extra Miles ($) = Extra Miles × 1.5", round2(t.extraDollars)],
+      ["Expected soft saving (Est.diff − Extra Miles $)", round2(t.softSaving)],
+      ["Expected soft saving with unfollowed", round2(t.softSavingUnfollowed)],
+    ];
+  }
   function exportExcel() {
-    const aoa = [HEADERS, ...rows.map(rowArray)];
+    const aoa = [HEADERS, ...rows.map(rowArray), ...softSummaryRows()];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, (curLabel || "Toll").slice(0, 28));
@@ -109,6 +157,16 @@
       headStyles: { fillColor: [27, 58, 99], textColor: 255, fontSize: 6 },
       theme: "grid", margin: { left: 16, right: 16 },
     });
+    const t = softTotals();
+    let y = (doc.lastAutoTable ? doc.lastAutoTable.finalY : 60) + 20;
+    doc.setFontSize(10);
+    [
+      ["Estimated difference (jami):", fmt2(t.estDiff)],
+      ["Extra Miles (jami):", fmt2(t.extraMiles) + " mi"],
+      ["Extra Miles ($) = ×1.5:", fmoney(t.extraDollars)],
+      ["Expected soft saving:", fmoney(t.softSaving)],
+      ["Expected soft saving with unfollowed:", fmoney(t.softSavingUnfollowed)],
+    ].forEach(([k, v]) => { doc.text(k + "  " + v, 30, y); y += 15; });
     doc.save(fileBase() + ".pdf");
   }
 
@@ -167,6 +225,12 @@
       $("#toll-save").addEventListener("click", (e) => save(e.currentTarget));
       $("#toll-xls").addEventListener("click", exportExcel);
       $("#toll-pdf").addEventListener("click", exportPdf);
+      $("#toll-soft-btn").addEventListener("click", (e) => {
+        const p = $("#toll-soft-panel"), show = p.classList.contains("hidden");
+        p.classList.toggle("hidden");
+        e.currentTarget.classList.toggle("active", show);
+        if (show) { renderSoft(); p.scrollIntoView({ behavior: "smooth", block: "start" }); }
+      });
       $("#toll-rep-save").addEventListener("click", (e) => saveReport(e.currentTarget));
       $("#toll-rep-del").addEventListener("click", deleteSelected);
       $("#toll-rep-sel").addEventListener("change", (e) => openSelected(e.target.value));

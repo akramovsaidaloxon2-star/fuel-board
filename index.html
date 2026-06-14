@@ -256,6 +256,7 @@
         <span class="toll-sep"></span>
         <button class="btn" id="toll-xls">⬇️ Excel</button>
         <button class="btn" id="toll-pdf">⬇️ PDF</button>
+        <button class="btn" id="toll-soft-btn">💰 Soft saving</button>
         <span class="toll-sep"></span>
         <select id="toll-rep-type" title="Report turi">
           <option value="weekly">Haftalik</option>
@@ -271,13 +272,25 @@
       <div class="board" style="overflow-x:auto">
         <table class="idle-table toll-table" id="toll-table">
           <thead><tr>
-            <th>Driver</th><th>Unit</th><th>Load ID</th><th>Date</th><th>From&gt;To</th>
-            <th>Toll calc</th><th>Given dir</th><th>Est diff</th><th>Status</th>
-            <th>DH</th><th>Dispatched</th><th>Directed</th><th>Extra</th>
-            <th>Driven</th><th>Total Driven</th><th>Driven toll</th><th>Charge</th><th></th>
+            <th>Driver</th><th>Unit</th><th>Load ID</th><th>Date</th><th>From &gt; To</th>
+            <th>Toll calculator</th><th>Given direction</th><th>Estimated difference</th>
+            <th class="toll-status-h">Status</th>
+            <th>DH</th><th>Dispatched mile</th><th>Directed mile</th><th>Extra mile</th>
+            <th>Driven mile</th><th>Total Driven Mile</th><th>Driven toll</th><th>Charge</th><th></th>
           </tr></thead>
           <tbody id="toll-rows"></tbody>
         </table>
+      </div>
+
+      <div id="toll-soft-panel" class="hidden">
+        <div class="toll-fee-head"><h3>Soft saving</h3></div>
+        <div class="soft-grid">
+          <div class="soft-card"><span class="soft-k">Estimated difference (jami)</span><span class="soft-v" id="soft-est">0</span></div>
+          <div class="soft-card"><span class="soft-k">Extra Miles (jami)</span><span class="soft-v" id="soft-extra">0</span></div>
+          <div class="soft-card"><span class="soft-k">Extra Miles ($) = Extra Miles × 1.5</span><span class="soft-v" id="soft-extra-d">$0.00</span></div>
+          <div class="soft-card hl"><span class="soft-k">Expected soft saving = Est.diff − Extra Miles ($)</span><span class="soft-v" id="soft-save">$0.00</span></div>
+          <div class="soft-card"><span class="soft-k">Expected soft saving (unfollowed bilan)</span><span class="soft-v" id="soft-save-unf">$0.00</span></div>
+        </div>
       </div>
     </div>
 
