@@ -8,7 +8,7 @@
   // Soft saving constants (from the bottom of the report's main toll sheet).
   const EXTRA_MILE_RATE = 1.5;    // Extra Miles ($) = Extra Miles × 1.5
 
-  function blank() { return { driver: "", unit: "", loadId: "", date: "", route: "", tollCalc: null, givenDir: null, status: "", dh: null, dispatched: null, directed: null, driven: null, totalDriven: null, drivenToll: null, charge: null }; }
+  function blank() { return { driver: "", unit: "", loadId: "", date: "", route: "", tollCalc: null, givenDir: null, status: "", dh: null, dispatched: null, directed: null, driven: null, totalDriven: null, drivenToll: null, charge: null, note: "" }; }
   const money = (n) => (n == null || isNaN(n)) ? "" : "$" + Number(n).toFixed(2);
   const num = (n) => (n == null || isNaN(n)) ? "" : Number(n).toFixed(1);
   const esc = (v) => String(v == null ? "" : v).replace(/"/g, "&quot;");
@@ -25,6 +25,12 @@
     const cls = v === "FOLLOWED" ? "ok" : (v === "NOT FOLLOWED" || v === "SKIPPED") ? "no" : "";
     const opt = (o) => `<option value="${o}" ${v === o ? "selected" : ""}>${o || "—"}</option>`;
     return `<select data-i="${i}" data-f="status" class="toll-status ${cls}" ${ro ? "disabled" : ""}>${["", "FOLLOWED", "NOT FOLLOWED", "SKIPPED"].map(opt).join("")}</select>`;
+  }
+  // Per-row note (e.g. why a load was NOT FOLLOWED). 📝 turns amber when a note exists; hover shows it.
+  function noteBtn(i, r) {
+    const has = r.note && String(r.note).trim();
+    const tip = has ? r.note : (ro ? "Note yo'q" : "Note (izoh) qoldirish");
+    return `<button type="button" class="toll-note ${has ? "has" : ""}" data-note="${i}" title="${esc(tip)}">📝</button>`;
   }
 
   // Flat row in the exact report column order, with computed est-diff and extra.
@@ -113,7 +119,7 @@
       <td>${inp(i, "tollCalc", "number", 64)}</td>
       <td>${inp(i, "givenDir", "number", 64)}</td>
       <td class="toll-auto" data-auto="ed-${i}">${estOf(r) != null ? money(estOf(r)) : ""}</td>
-      <td>${statusSel(i, r.status)}</td>
+      <td><div class="toll-status-cell">${statusSel(i, r.status)}${noteBtn(i, r)}</div></td>
       <td>${inp(i, "dh", "number", 56)}</td>
       <td>${inp(i, "dispatched", "number", 76)}</td>
       <td>${inp(i, "directed", "number", 76)}</td>
@@ -129,8 +135,19 @@
       tbody.querySelectorAll("select").forEach((el) => el.addEventListener("change", onInput));
       tbody.querySelectorAll(".toll-del").forEach((b) => b.addEventListener("click", () => { rows.splice(+b.dataset.del, 1); render(); }));
     }
+    // Note button works in both edit and read-only (view) modes.
+    tbody.querySelectorAll(".toll-note").forEach((b) => b.addEventListener("click", () => onNote(+b.dataset.note)));
     $("#toll-add").disabled = ro; $("#toll-save").disabled = ro;
     totals();
+  }
+
+  function onNote(i) {
+    const r = rows[i];
+    if (ro) { alert(r.note ? r.note : "Note yo'q"); return; }
+    const v = prompt("Note (izoh) — masalan: nega NOT FOLLOWED bo'ldi:", r.note || "");
+    if (v === null) return;            // Bekor qilindi
+    r.note = v.trim();
+    render();                          // 📝 holatini yangilash uchun
   }
 
   function onInput(e) {
@@ -176,7 +193,7 @@
     ];
   }
   function exportExcel() {
-    const aoa = [HEADERS, ...rows.map(rowArray), ...softSummaryRows()];
+    const aoa = [[...HEADERS, "Note"], ...rows.map((r) => [...rowArray(r), r.note || ""]), ...softSummaryRows()];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, (curLabel || "Toll").slice(0, 28));
@@ -189,7 +206,7 @@
     doc.setFontSize(12);
     doc.text("MOVEX — Toll report" + (curLabel ? " · " + curLabel : ""), 30, 28);
     doc.autoTable({
-      head: [HEADERS], body: rows.map(rowArray), startY: 40,
+      head: [[...HEADERS, "Note"]], body: rows.map((r) => [...rowArray(r), r.note || ""]), startY: 40,
       styles: { fontSize: 5.5, cellPadding: 2, overflow: "linebreak" },
       headStyles: { fillColor: [27, 58, 99], textColor: 255, fontSize: 6 },
       theme: "grid", margin: { left: 16, right: 16 },

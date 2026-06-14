@@ -569,6 +569,25 @@ footer {
 .toll-help-card li { font-size: 13px; line-height: 1.7; color: var(--text); }
 .toll-help-card b { color: var(--text); }
 
+/* Toll header row: taller + subtle accent tint */
+.toll-table thead th {
+  padding: 14px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  background: rgba(77, 140, 255, 0.10);
+  border-bottom: 2px solid var(--accent);
+}
+
+/* Status cell: dropdown + note button */
+.toll-status-cell { display: flex; align-items: center; gap: 4px; }
+.toll-note {
+  height: 26px; min-width: 28px; padding: 0; font-size: 13px; line-height: 1; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); border-radius: 5px;
+}
+.toll-note:hover { border-color: var(--accent); color: var(--text); }
+.toll-note.has { background: rgba(245, 158, 11, 0.18); border-color: #f59e0b; color: #f59e0b; }
+
 /* Pilot daily price upload bar (manager-only) */
 .price-bar { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; }
 .role-worker .price-bar { display: none; }
