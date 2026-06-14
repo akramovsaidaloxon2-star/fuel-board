@@ -557,6 +557,18 @@ footer {
 .toll-foot-soft td { font-weight: 700; }
 .toll-foot-soft td:nth-child(2), .toll-foot-soft td:nth-child(4) { color: var(--accent); }
 
+/* Toll "how it works" help panel */
+.toll-help { margin: 14px 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); padding: 16px 18px; }
+.toll-help-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.toll-help-top h3 { margin: 0; font-size: 16px; }
+.toll-help-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.toll-help-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.toll-help-card.wide { grid-column: 1 / -1; }
+.toll-help-card h4 { margin: 0 0 8px; font-size: 14px; }
+.toll-help-card ul { margin: 0; padding-left: 18px; }
+.toll-help-card li { font-size: 13px; line-height: 1.7; color: var(--text); }
+.toll-help-card b { color: var(--text); }
+
 /* Pilot daily price upload bar (manager-only) */
 .price-bar { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; }
 .role-worker .price-bar { display: none; }

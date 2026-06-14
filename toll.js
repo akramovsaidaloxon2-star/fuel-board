@@ -265,6 +265,14 @@
       $("#toll-rep-save").addEventListener("click", (e) => saveReport(e.currentTarget));
       $("#toll-rep-del").addEventListener("click", deleteSelected);
       $("#toll-rep-sel").addEventListener("change", (e) => openSelected(e.target.value));
+      const helpToggle = (force) => {
+        const p = $("#toll-help-panel"), show = force != null ? force : p.classList.contains("hidden");
+        p.classList.toggle("hidden", !show);
+        $("#toll-help-btn").classList.toggle("active", show);
+        if (show) p.scrollIntoView({ behavior: "smooth", block: "start" });
+      };
+      $("#toll-help-btn").addEventListener("click", () => helpToggle());
+      $("#toll-help-close").addEventListener("click", () => helpToggle(false));
     }
     curId = "__live"; ro = false; curLabel = "";
     try { rows = await (await fetch("/api/toll")).json(); } catch { rows = []; }

@@ -256,6 +256,7 @@
         <span class="toll-sep"></span>
         <button class="btn" id="toll-xls">⬇️ Excel</button>
         <button class="btn" id="toll-pdf">⬇️ PDF</button>
+        <button class="btn" id="toll-help-btn">ℹ️ Qanday ishlaydi</button>
         <span class="toll-sep"></span>
         <select id="toll-rep-type" title="Report turi">
           <option value="weekly">Haftalik</option>
@@ -268,6 +269,63 @@
         <button class="btn" id="toll-rep-del" title="Tanlangan reportni o'chirish">🗑️</button>
         <span id="toll-totals" class="rep-period"></span>
       </div>
+
+      <div id="toll-help-panel" class="hidden toll-help">
+        <div class="toll-help-top">
+          <h3>ℹ️ Toll board — qanday ishlaydi</h3>
+          <button class="btn" id="toll-help-close">✕ Yopish</button>
+        </div>
+
+        <div class="toll-help-grid">
+          <section class="toll-help-card">
+            <h4>🛠 Tugmalar</h4>
+            <ul>
+              <li><b>➕ Qator qo'shish</b> — pastga yangi bo'sh qator qo'shadi.</li>
+              <li><b>💾 Saqlash</b> — Live board'ni saqlaydi (keyingi safar shu ma'lumot ochiladi).</li>
+              <li><b>⬇️ Excel / ⬇️ PDF</b> — jadvalni yuklab olasiz. Pastdagi TOTAL + soft saving bloki ham fayl ichiga tushadi.</li>
+              <li><b>🗑️</b> — tanlangan saqlangan reportni o'chiradi.</li>
+            </ul>
+          </section>
+
+          <section class="toll-help-card">
+            <h4>📅 Reportlar (snapshot)</h4>
+            <ul>
+              <li><b>Haftalik / Oylik</b> + nom yozib <b>📅 Reportga saqlash</b> — shu paytdagi board nusxasini saqlab qo'yadi.</li>
+              <li><b>🔴 Live board</b> dropdown'i — saqlangan reportni ochadi. U <b>faqat o'qish</b> uchun (tahrirlab bo'lmaydi), lekin Excel/PDF qilsa bo'ladi.</li>
+              <li>Live board'ga qaytish uchun dropdown'dan <b>🔴 Live board</b> ni tanlang.</li>
+            </ul>
+          </section>
+
+          <section class="toll-help-card">
+            <h4>🧮 Avtomatik ustunlar</h4>
+            <ul>
+              <li><b>Estimated difference</b> = Toll calculator − Given direction (avtomatik).</li>
+              <li><b>Extra mile</b> = Directed mile − Dispatched mile (avtomatik).</li>
+              <li>Qolgan ustunlarni o'zingiz kiritasiz.</li>
+            </ul>
+          </section>
+
+          <section class="toll-help-card">
+            <h4>🚦 Status qoidasi</h4>
+            <ul>
+              <li><b style="color:var(--full)">FOLLOWED</b> → soft saving hisoblanadi (Est diff = Toll calc − Given dir).</li>
+              <li><b style="color:var(--critical)">NOT FOLLOWED / SKIPPED</b> → Est diff avtomatik <b>$0</b> bo'ladi (haydovchi yo'nalishni bajarmagani uchun tejash yo'q).</li>
+            </ul>
+          </section>
+
+          <section class="toll-help-card wide">
+            <h4>💰 Pastdagi hisob (TOTAL + soft saving)</h4>
+            <ul>
+              <li><b>🟠 TOTAL</b> — har bir ustunning yig'indisi (qator qo'shilsa avtomatik o'sadi).</li>
+              <li><b>Extra Miles ($)</b> = jami Extra mile × <b>1.5</b> — ortiqcha millarning pul qiymati.</li>
+              <li><b>Expected soft saving</b> = jami Estimated difference − Extra Miles ($) — toll yo'llardan chetlanib tejalgan <b>sof pul</b>.</li>
+              <li><b>Expected soft saving with unfollowed</b> = soft saving − jami <b>Charge</b> (haydovchidan undirilgan summa ayriladi).</li>
+              <li>Hammasi <b>live</b> hisoblanadi — qatorni o'zgartirsangiz darrov yangilanadi.</li>
+            </ul>
+          </section>
+        </div>
+      </div>
+
       <div class="board" style="overflow-x:auto">
         <table class="idle-table toll-table" id="toll-table">
           <thead><tr>
