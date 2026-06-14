@@ -837,6 +837,7 @@ const server = http.createServer(async (req, res) => {
       rows: body.rows,
       unmatched: body.unmatched || [],
       totals: body.totals || null,
+      reviews: (body.reviews && typeof body.reviews === "object") ? body.reviews : {},
     };
     reports.push(rec);
     saveReports();
@@ -853,6 +854,24 @@ const server = http.createServer(async (req, res) => {
   if (reportMatch && req.method === "DELETE") {
     const i = reports.findIndex((x) => x.id === reportMatch[1]);
     if (i >= 0) { reports.splice(i, 1); saveReports(); }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  // Manual review of a low-MPG unit (checked / all-good / bad + note), persisted.
+  const reviewMatch = req.url.match(/^\/api\/reports\/([\w-]+)\/review$/);
+  if (reviewMatch && req.method === "POST") {
+    const rec = reports.find((x) => x.id === reviewMatch[1]);
+    if (!rec) { res.writeHead(404, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: "not found" })); return; }
+    const body = await readBody(req);
+    const unit = body && (body.unit || "").trim();
+    if (!unit) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: "unit kerak" })); return; }
+    rec.reviews = rec.reviews || {};
+    const status = body.status === "good" || body.status === "bad" ? body.status : null;
+    const note = (body.note || "").trim();
+    if (!status && !note) delete rec.reviews[unit];
+    else rec.reviews[unit] = { status, note };
+    saveReports();
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
     return;

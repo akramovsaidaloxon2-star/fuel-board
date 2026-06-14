@@ -3,6 +3,8 @@
   let fuelAgg = null, perfAgg = null, allTx = [];
   let period = { start: null, end: null };
   let computed = null;
+  let reviews = {};              // unit -> { status:"good"|"bad", note }
+  let currentReportId = null;    // set when a saved report is open (enables persist)
   let wired = false;
   let sortCol = "unit", sortDir = 1;
 
@@ -105,6 +107,8 @@
       qty: +tQty.toFixed(1), amt: +tAmt.toFixed(2), idle: +tIdle.toFixed(1), miles: +tMiles.toFixed(1),
       ppg: tQty ? +(tAmt / tQty).toFixed(2) : null, mpg: tQty ? +(tMiles / tQty).toFixed(2) : null, cpm: tMiles ? +(tAmt / tMiles).toFixed(2) : null,
     } };
+    reviews = {};            // fresh report — no reviews yet
+    currentReportId = null;  // not saved yet; reviews persist on Save
     render();
   }
 
@@ -130,16 +134,28 @@
     const box = $("#rep-lowmpg");
     if (low.length) {
       box.classList.remove("hidden");
-      $("#rep-lowmpg-title").textContent = `Eng past MPG (< 6) — ${low.length} ta`;
-      $("#rep-lowmpg-list").innerHTML = low.map((r) => `
-        <div class="cov-item">
+      const doneCount = low.filter((r) => reviews[r.unit] && reviews[r.unit].status).length;
+      $("#rep-lowmpg-title").textContent = `Eng past MPG (< 6) — ${low.length} ta · ${doneCount}/${low.length} tekshirildi`;
+      $("#rep-lowmpg-list").innerHTML = low.map((r) => {
+        const rv = reviews[r.unit] || {};
+        return `
+        <div class="cov-item lowmpg-item rev-${rv.status || "none"}" data-unit="${r.unit}">
           <span class="u">${r.unit}</span>
           <span class="m mpg bad">${r.mpg} MPG</span>
           <span class="a">${fmt(r.miles, 0)} mi · ${fmt(r.qty, 0)} gal</span>
-          <button class="btn rep-check-btn" data-unit="${r.unit}" style="margin-top:6px">🔍 Check</button>
-        </div>`).join("");
+          <div class="rev-btns">
+            <button class="rev-btn good ${rv.status === "good" ? "on" : ""}" data-unit="${r.unit}" data-st="good">✓ All good</button>
+            <button class="rev-btn bad ${rv.status === "bad" ? "on" : ""}" data-unit="${r.unit}" data-st="bad">⚠️ Yomon</button>
+          </div>
+          <input class="rev-note" data-unit="${r.unit}" placeholder="izoh…" value="${(rv.note || "").replace(/"/g, "&quot;")}">
+          <button class="btn rep-check-btn" data-unit="${r.unit}">🔍 Check</button>
+        </div>`; }).join("");
       $("#rep-lowmpg-list").querySelectorAll(".rep-check-btn").forEach((b) =>
         b.addEventListener("click", () => checkUnit(b.dataset.unit, b)));
+      $("#rep-lowmpg-list").querySelectorAll(".rev-btn").forEach((b) =>
+        b.addEventListener("click", () => toggleReview(b.dataset.unit, b.dataset.st)));
+      $("#rep-lowmpg-list").querySelectorAll(".rev-note").forEach((n) =>
+        n.addEventListener("change", () => setReviewNote(n.dataset.unit, n.value)));
       $("#rep-check-detail").innerHTML = "";
     } else box.classList.add("hidden");
 
@@ -220,14 +236,47 @@
     el.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
+  // ---- Manual review (low-MPG checked list) ----
+  function toggleReview(unit, status) {
+    const rv = reviews[unit] || {};
+    rv.status = rv.status === status ? null : status;
+    if (!rv.status && !rv.note) delete reviews[unit]; else reviews[unit] = rv;
+    persistReview(unit);
+    const item = document.querySelector(`#rep-lowmpg-list .lowmpg-item[data-unit="${unit}"]`);
+    if (item) {
+      const cur = reviews[unit] && reviews[unit].status;
+      item.className = `cov-item lowmpg-item rev-${cur || "none"}`;
+      item.querySelectorAll(".rev-btn").forEach((b) => b.classList.toggle("on", b.dataset.st === cur));
+    }
+    updateReviewCount();
+  }
+  function setReviewNote(unit, note) {
+    const rv = reviews[unit] || {};
+    rv.note = note.trim();
+    if (!rv.status && !rv.note) delete reviews[unit]; else reviews[unit] = rv;
+    persistReview(unit);
+  }
+  function updateReviewCount() {
+    const items = $("#rep-lowmpg-list").querySelectorAll(".lowmpg-item");
+    const done = [...items].filter((it) => reviews[it.dataset.unit] && reviews[it.dataset.unit].status).length;
+    $("#rep-lowmpg-title").textContent = `Eng past MPG (< 6) — ${items.length} ta · ${done}/${items.length} tekshirildi`;
+  }
+  async function persistReview(unit) {
+    if (!currentReportId) return; // unsaved report -> stored together on Save
+    const rv = reviews[unit] || {};
+    try {
+      await fetch(`/api/reports/${currentReportId}/review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unit, status: rv.status || null, note: rv.note || "" }) });
+    } catch {}
+  }
+
   // ---- Save / history ----
   async function save() {
     if (!computed) return;
     $("#rep-save").disabled = true;
-    const body = { type: $("#rep-type").value, periodStart: period.start, periodEnd: period.end, rows: computed.rows, unmatched: computed.unmatched, totals: computed.totals };
+    const body = { type: $("#rep-type").value, periodStart: period.start, periodEnd: period.end, rows: computed.rows, unmatched: computed.unmatched, totals: computed.totals, reviews };
     const res = await fetch("/api/reports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const j = await res.json();
-    if (j.ok) { alert("Saqlandi ✓"); loadHistory(); } else { alert("Xato: " + (j.error || "")); $("#rep-save").disabled = false; }
+    if (j.ok) { currentReportId = j.id; alert("Saqlandi ✓"); loadHistory(); } else { alert("Xato: " + (j.error || "")); $("#rep-save").disabled = false; }
   }
 
   async function loadHistory() {
@@ -255,6 +304,8 @@
     const r = await res.json();
     if (!r || !r.rows) return;
     computed = { rows: r.rows, unmatched: r.unmatched || [], totals: r.totals || {} };
+    reviews = r.reviews || {};
+    currentReportId = id;
     period = { start: r.periodStart, end: r.periodEnd };
     if (r.type) $("#rep-type").value = r.type;
     $("#rep-period").textContent = period.start ? period.start + " → " + period.end : "";

@@ -521,6 +521,21 @@ footer {
   padding: 3px 8px; border-radius: 999px; }
 .fs-pill.brand-loves { background: #c8860a; }
 .fs-pill.brand-ta { background: #138a72; }
+
+/* --- Low-MPG manual review (checked list) --- */
+#rep-lowmpg-list { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.lowmpg-item.rev-good { border-color: var(--full); }
+.lowmpg-item.rev-bad { border-color: var(--critical); }
+.rev-btns { display: flex; gap: 6px; margin-top: 6px; }
+.rev-btn { flex: 1; border: 1px solid var(--border); background: var(--surface); color: var(--text-dim);
+  border-radius: 6px; padding: 5px 6px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.rev-btn:hover { border-color: var(--text-dim); }
+.rev-btn.good.on { background: var(--full); border-color: var(--full); color: #06281c; font-weight: 600; }
+.rev-btn.bad.on { background: var(--critical); border-color: var(--critical); color: #2a0a0a; font-weight: 600; }
+.rev-note { margin-top: 6px; width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text);
+  border-radius: 6px; padding: 5px 7px; font-size: 12px; }
+.rev-note:focus { outline: none; border-color: var(--accent); }
+.rep-check-btn { margin-top: 6px; }
 .fs-mi { color: var(--text); font-size: 13px; font-weight: 600; }
 .fs-assigned.near .fs-mi { color: var(--full); }
 .fs-clear { background: none; border: none; color: var(--text-mute); cursor: pointer; font-size: 13px;
