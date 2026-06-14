@@ -326,6 +326,9 @@ body.light .fuel-pct.full { color: var(--text); }
 .toll-table td { padding: 3px 4px; text-align: center; }
 .toll-table input { height: 28px; font-size: 12px; padding: 0 6px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 5px; text-align: center; }
 .toll-table input:focus { border-color: var(--accent); outline: none; }
+.toll-table input[type="date"] { font-size: 11px; padding: 0 4px; cursor: pointer; }
+.toll-table input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); cursor: pointer; }
+body.light .toll-table input[type="date"]::-webkit-calendar-picker-indicator { filter: none; }
 .toll-auto { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: center; }
 .toll-status { height: 28px; font-size: 11px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 5px; }
 .toll-status.ok { background: rgba(43,182,115,0.18); color: var(--full); border-color: var(--full); }

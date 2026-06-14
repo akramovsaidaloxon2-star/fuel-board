@@ -21,6 +21,18 @@
   }
 
   function inp(i, f, type, w) { const v = rows[i][f] == null ? "" : rows[i][f]; return `<input data-i="${i}" data-f="${f}" type="${type}" value="${esc(v)}" style="width:${w}px" ${ro ? "disabled" : ""}>`; }
+
+  // Date is shown/stored as DD.MM.YYYY (report format) but edited with a native date picker (no manual typing).
+  function toISO(d) {
+    if (!d) return "";
+    const s = String(d).trim();
+    const m = s.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/);   // DD.MM.YYYY
+    if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;                    // already ISO
+    return "";
+  }
+  function fromISO(iso) { const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}.${m[2]}.${m[1]}` : (iso || ""); }
+  function dateInp(i, w) { return `<input data-i="${i}" data-f="date" type="date" value="${toISO(rows[i].date)}" style="width:${w}px" ${ro ? "disabled" : ""}>`; }
   function statusSel(i, v) {
     const cls = v === "FOLLOWED" ? "ok" : (v === "NOT FOLLOWED" || v === "SKIPPED") ? "no" : "";
     const opt = (o) => `<option value="${o}" ${v === o ? "selected" : ""}>${o || "—"}</option>`;
@@ -114,7 +126,7 @@
       <td>${inp(i, "driver", "text", 220)}</td>
       <td>${inp(i, "unit", "text", 64)}</td>
       <td>${inp(i, "loadId", "text", 120)}</td>
-      <td>${inp(i, "date", "text", 92)}</td>
+      <td>${dateInp(i, 120)}</td>
       <td>${inp(i, "route", "text", 110)}</td>
       <td>${inp(i, "tollCalc", "number", 64)}</td>
       <td>${inp(i, "givenDir", "number", 64)}</td>
@@ -154,6 +166,7 @@
     const el = e.target, i = +el.dataset.i, f = el.dataset.f;
     let v = el.value;
     if (el.type === "number") v = v === "" ? null : parseFloat(v);
+    else if (el.type === "date") v = fromISO(v);   // store report format DD.MM.YYYY
     rows[i][f] = v;
     const r = rows[i];
     if (f === "tollCalc" || f === "givenDir" || f === "status") { const c = document.querySelector(`[data-auto="ed-${i}"]`); if (c) { const e = estOf(r); c.textContent = e != null ? money(e) : ""; } }
