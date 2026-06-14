@@ -322,11 +322,11 @@ body.light .fuel-pct.full { color: var(--text); }
 .rank-pos { font-weight: 600; font-size: 15px; text-align: center; width: 44px; }
 
 .toll-table { font-size: 12px; }
-.toll-table th { white-space: nowrap; font-size: 10px; }
-.toll-table td { padding: 3px 4px; }
-.toll-table input { height: 28px; font-size: 12px; padding: 0 6px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 5px; }
+.toll-table th { white-space: nowrap; font-size: 10px; text-align: center; }
+.toll-table td { padding: 3px 4px; text-align: center; }
+.toll-table input { height: 28px; font-size: 12px; padding: 0 6px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 5px; text-align: center; }
 .toll-table input:focus { border-color: var(--accent); outline: none; }
-.toll-auto { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.toll-auto { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: center; }
 .toll-status { height: 28px; font-size: 11px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 5px; }
 .toll-status.ok { background: rgba(43,182,115,0.18); color: var(--full); border-color: var(--full); }
 .toll-status.no { background: rgba(226,75,74,0.18); color: var(--critical); border-color: var(--critical); }
@@ -577,10 +577,11 @@ footer {
   color: var(--text);
   background: rgba(77, 140, 255, 0.10);
   border-bottom: 2px solid var(--accent);
+  text-align: center;
 }
 
-/* Status cell: dropdown + note button */
-.toll-status-cell { display: flex; align-items: center; gap: 4px; }
+/* Status cell: dropdown + note button (centered) */
+.toll-status-cell { display: flex; align-items: center; justify-content: center; gap: 4px; }
 .toll-note {
   height: 26px; min-width: 28px; padding: 0; font-size: 13px; line-height: 1; cursor: pointer;
   background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); border-radius: 5px;
