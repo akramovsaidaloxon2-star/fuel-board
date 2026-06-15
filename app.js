@@ -98,9 +98,10 @@ function render() {
     const fuelTag = r.fuelSource === "live"
       ? `<span class="fuel-tag live">live</span>`
       : cached ? `<span class="fuel-tag">last known · ${formatUpdated(r.fuelAgeMin)}</span>` : "";
-    const fuelCell = hasFuel
+    const limitLine = `<div class="gal-limit-line"><span class="gal-limit ${r.gallonLimit ? "set" : ""}" data-limitunit="${esc(r.unit)}">${r.gallonLimit ? "Limit: " + r.gallonLimit + " gal" : "＋ limit"}</span></div>`;
+    const fuelCell = (hasFuel
       ? `<span class="fuel-pct ${fc}">${r.fuel}%</span> ${fuelTag}<div class="driver-meta">${gallons} / ${r.tankGal} gal</div>`
-      : `<span class="fuel-pct none">No data yet</span>`;
+      : `<span class="fuel-pct none">No data yet</span>`) + limitLine;
     // Only trust the range when the reading is fresh. A long-stale "last known"
     // value (e.g. truck refueled while parked) would show a misleadingly low range.
     const fuelFresh = r.fuelSource === "live" || (r.fuelAgeMin != null && r.fuelAgeMin <= 360);
@@ -205,6 +206,35 @@ function render() {
   tbody.querySelectorAll(".unit-note").forEach(b => {
     b.addEventListener("click", () => openNoteModal(b.dataset.noteunit));
   });
+  tbody.querySelectorAll(".gal-limit").forEach(el => {
+    el.addEventListener("click", () => startLimitEdit(el));
+  });
+}
+
+function startLimitEdit(span) {
+  const unit = span.dataset.limitunit;
+  const row = fleet.find(x => x.unit === unit);
+  const inp = document.createElement("input");
+  inp.type = "number"; inp.className = "gal-limit-inp"; inp.min = "0";
+  inp.value = (row && row.gallonLimit) ? row.gallonLimit : "";
+  inp.placeholder = "gal";
+  span.replaceWith(inp);
+  inp.focus();
+  let done = false;
+  const commit = async (save) => {
+    if (done) return; done = true;
+    if (save) {
+      const v = inp.value.trim();
+      const limit = v === "" ? null : parseFloat(v);
+      try {
+        await fetch("/api/unit-limit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unit, limit }) });
+        if (row) row.gallonLimit = (limit && limit > 0) ? Math.round(limit * 10) / 10 : null;
+      } catch (e) { alert("Xato: " + e.message); }
+    }
+    render();
+  };
+  inp.addEventListener("keydown", (e) => { if (e.key === "Enter") commit(true); else if (e.key === "Escape") commit(false); });
+  inp.addEventListener("blur", () => commit(true));
 }
 
 let noteUnit = null;

@@ -257,6 +257,19 @@ function saveUnitNotes() {
   }, 800);
 }
 
+// --- Per-unit gallon limit (max gallons per fill) — durable ---
+const ULIMITS_STORE = path.join(__dirname, "unit_limits.json");
+let unitLimits = {};
+try { unitLimits = JSON.parse(fs.readFileSync(ULIMITS_STORE, "utf8")); } catch { unitLimits = {}; }
+let ulimitsTimer = null;
+function saveUnitLimits() {
+  clearTimeout(ulimitsTimer);
+  ulimitsTimer = setTimeout(() => {
+    fs.writeFile(ULIMITS_STORE, JSON.stringify(unitLimits), () => {});
+    ghSave("unit_limits.json", unitLimits);
+  }, 800);
+}
+
 // Normalize a store number so "008", "8", "#8" all map to the same key.
 function normNum(s) {
   s = String(s == null ? "" : s).trim().replace(/^#/, "");
@@ -771,10 +784,22 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ ok: true }));
     return;
   }
+  // Per-unit gallon limit (max gallons per fill). Any signed-in user can set.
+  if (req.url === "/api/unit-limit" && req.method === "POST") {
+    const body = await readBody(req);
+    const unit = (body && body.unit || "").trim();
+    if (!unit) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: "unit kerak" })); return; }
+    const lim = parseFloat(body.limit);
+    if (Number.isFinite(lim) && lim > 0) unitLimits[unit] = Math.round(lim * 10) / 10; else delete unitLimits[unit];
+    saveUnitLimits();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
   if (req.url === "/api/fuel" || req.url.startsWith("/api/fuel?")) {
     try {
       const data = await getFuelData();
-      for (const r of data.fleet) { r.assignedStop = assignments[r.unit] || null; r.note = unitNotes[r.unit] || ""; }
+      for (const r of data.fleet) { r.assignedStop = assignments[r.unit] || null; r.note = unitNotes[r.unit] || ""; r.gallonLimit = unitLimits[r.unit] != null ? unitLimits[r.unit] : null; }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(data));
     } catch (e) {
@@ -1078,6 +1103,8 @@ async function initDurable() {
   if (Array.isArray(tr)) tollReports = tr;
   const un = await ghLoad("unit_notes.json");
   if (un && typeof un === "object" && !Array.isArray(un)) unitNotes = un;
+  const ul = await ghLoad("unit_limits.json");
+  if (ul && typeof ul === "object" && !Array.isArray(ul)) unitLimits = ul;
   console.log(`  Durable store:       GitHub ${GH_REPO} ✓ (reports: ${reports.length})`);
 }
 

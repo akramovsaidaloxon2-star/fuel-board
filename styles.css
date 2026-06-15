@@ -562,6 +562,13 @@ footer {
 .note-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .note-actions .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 
+/* Per-unit gallon limit (in the Fuel level cell) */
+.gal-limit-line { margin-top: 3px; }
+.gal-limit { font-size: 11px; cursor: pointer; color: var(--text-mute); border: 1px dashed var(--border); border-radius: 5px; padding: 1px 6px; }
+.gal-limit:hover { color: var(--text); border-color: var(--accent); }
+.gal-limit.set { color: #f59e0b; border-color: #f59e0b; border-style: solid; font-weight: 600; }
+.gal-limit-inp { width: 64px; font-size: 11px; background: var(--surface-2); border: 1px solid var(--accent); color: var(--text); border-radius: 5px; padding: 2px 6px; }
+
 /* Toll controls: separators + selects */
 .toll-sep { display: inline-block; width: 1px; height: 22px; background: var(--border); margin: 0 3px; vertical-align: middle; }
 #toll-rep-type, #toll-rep-sel, #toll-rep-label { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 7px 8px; font-size: 13px; }
