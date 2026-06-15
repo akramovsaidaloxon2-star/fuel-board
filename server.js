@@ -528,6 +528,8 @@ function saveToll() {
 }
 // Public read-only CSV of the toll board (token-gated) for a Google Sheets =IMPORTDATA share.
 const TOLL_CSV_KEY = process.env.TOLL_CSV_KEY || crypto.createHmac("sha256", SESSION_SECRET).update("toll-csv-v1").digest("hex").slice(0, 20);
+// Token for the daily Pilot-price auto-push (Google Apps Script reading the email).
+const PRICE_PUSH_KEY = process.env.PRICE_PUSH_KEY || crypto.createHmac("sha256", SESSION_SECRET).update("price-push-v1").digest("hex").slice(0, 20);
 function csvCell(v) {
   if (v == null) return "";
   const s = String(v);
@@ -693,6 +695,26 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { "Content-Type": "text/csv; charset=utf-8", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
     res.end(tollToCsv(tollRows));
     return;
+  }
+  // Daily Pilot price auto-push from the Gmail Apps Script (token in the URL, no login).
+  if (req.url.startsWith("/api/fuel-price") && req.method === "POST") {
+    const key = new URL(req.url, "http://x").searchParams.get("key");
+    if (key && key === PRICE_PUSH_KEY) {
+      const body = await readBody(req);
+      if (!body || typeof body.prices !== "object" || Array.isArray(body.prices)) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "prices object kerak" }));
+        return;
+      }
+      const norm = {};
+      for (const k in body.prices) norm[normNum(k)] = body.prices[k];
+      priceData = { date: body.date || null, updatedAt: new Date().toISOString(), prices: norm, source: "auto-email" };
+      savePrices();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, count: Object.keys(norm).length, date: priceData.date }));
+      return;
+    }
+    // no/invalid key -> fall through to the cookie-gated browser upload handler below
   }
   // Validate credentials -> set a signed HttpOnly session cookie.
   if (req.url === "/api/login" && req.method === "POST") {
