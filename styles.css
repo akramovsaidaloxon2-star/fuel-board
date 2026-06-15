@@ -545,6 +545,13 @@ footer {
 .fs-clear:hover { color: var(--critical); background: var(--row-hover); }
 .fs-price { color: var(--full); font-weight: 700; font-size: 13px; }
 
+/* Per-unit note button on the fuel board */
+.note-cell { text-align: center; }
+.unit-note { height: 26px; min-width: 30px; padding: 0; font-size: 14px; line-height: 1; cursor: pointer;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text-mute); border-radius: 6px; }
+.unit-note:hover { border-color: var(--accent); color: var(--text); }
+.unit-note.has { background: rgba(245, 158, 11, 0.18); border-color: #f59e0b; color: #f59e0b; }
+
 /* Toll controls: separators + selects */
 .toll-sep { display: inline-block; width: 1px; height: 22px; background: var(--border); margin: 0 3px; vertical-align: middle; }
 #toll-rep-type, #toll-rep-sel, #toll-rep-label { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 7px 8px; font-size: 13px; }

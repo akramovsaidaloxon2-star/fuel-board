@@ -157,6 +157,7 @@ function render() {
           <div class="driver-name">${r.driver}</div>
           <div class="driver-meta">${r.phone || ""}</div>
         </td>
+        <td class="note-cell"><button class="unit-note ${r.note ? "has" : ""}" data-noteunit="${esc(r.unit)}" title="${r.note ? esc(r.note) : "Note qo‘shish"}">📝</button></td>
         <td>
           <div class="location">${r.location}</div>
           <div class="location-meta">${r.state}</div>
@@ -201,6 +202,22 @@ function render() {
   tbody.querySelectorAll(".fs-clear").forEach(b => {
     b.addEventListener("click", () => clearStop(b.dataset.unit));
   });
+  tbody.querySelectorAll(".unit-note").forEach(b => {
+    b.addEventListener("click", () => editUnitNote(b.dataset.noteunit));
+  });
+}
+
+async function editUnitNote(unit) {
+  const row = fleet.find(x => x.unit === unit);
+  const cur = row ? (row.note || "") : "";
+  const v = prompt(`Unit ${unit} — note (masalan: "exit bilan", "call qilmaslik"):`, cur);
+  if (v === null) return;
+  const note = v.trim();
+  try {
+    await fetch("/api/unit-note", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unit, note }) });
+    if (row) row.note = note;
+    render();
+  } catch (e) { alert("Xato: " + e.message); }
 }
 
 async function assignStop(unit, brand, station, inp) {

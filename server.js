@@ -244,6 +244,19 @@ function saveAssignments() {
 let fsBoardCache = { data: null, at: 0 };
 const FSBOARD_MS = 50 * 1000; // ~50s so the 60s board poll always recomputes miles
 
+// --- Per-unit notes (driver quirks: uses exits, no calls, etc.) — durable ---
+const UNOTES_STORE = path.join(__dirname, "unit_notes.json");
+let unitNotes = {};
+try { unitNotes = JSON.parse(fs.readFileSync(UNOTES_STORE, "utf8")); } catch { unitNotes = {}; }
+let unotesTimer = null;
+function saveUnitNotes() {
+  clearTimeout(unotesTimer);
+  unotesTimer = setTimeout(() => {
+    fs.writeFile(UNOTES_STORE, JSON.stringify(unitNotes), () => {});
+    ghSave("unit_notes.json", unitNotes);
+  }, 800);
+}
+
 // Normalize a store number so "008", "8", "#8" all map to the same key.
 function normNum(s) {
   s = String(s == null ? "" : s).trim().replace(/^#/, "");
@@ -746,10 +759,22 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ role: req._role || "manager" }));
     return;
   }
+  // Per-unit note (driver quirks). Any signed-in user can read/set.
+  if (req.url === "/api/unit-note" && req.method === "POST") {
+    const body = await readBody(req);
+    const unit = (body && body.unit || "").trim();
+    if (!unit) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: "unit kerak" })); return; }
+    const note = String(body.note == null ? "" : body.note).slice(0, 500).trim();
+    if (note) unitNotes[unit] = note; else delete unitNotes[unit];
+    saveUnitNotes();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
   if (req.url === "/api/fuel" || req.url.startsWith("/api/fuel?")) {
     try {
       const data = await getFuelData();
-      for (const r of data.fleet) r.assignedStop = assignments[r.unit] || null;
+      for (const r of data.fleet) { r.assignedStop = assignments[r.unit] || null; r.note = unitNotes[r.unit] || ""; }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(data));
     } catch (e) {
@@ -1051,6 +1076,8 @@ async function initDurable() {
   if (pr && pr.prices) priceData = pr;
   const tr = await ghLoad("toll_reports_data.json");
   if (Array.isArray(tr)) tollReports = tr;
+  const un = await ghLoad("unit_notes.json");
+  if (un && typeof un === "object" && !Array.isArray(un)) unitNotes = un;
   console.log(`  Durable store:       GitHub ${GH_REPO} ✓ (reports: ${reports.length})`);
 }
 

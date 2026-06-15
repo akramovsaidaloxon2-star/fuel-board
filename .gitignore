@@ -9,6 +9,7 @@ toll_data.json
 toll_reports_data.json
 odo_daily.json
 assignments.json
+unit_notes.json
 prices.json
 *.log
 truck_raw.png
