@@ -60,7 +60,7 @@
       { const e = estOf(r); if (e != null) est += e; }
       if (r.status === "FOLLOWED") foll++; else if (r.status === "NOT FOLLOWED") notf++; else if (r.status === "SKIPPED") skip++;
     });
-    const ctx = curId && curId !== "__live" ? `📅 ${curLabel} (saqlangan) · ` : "";
+    const ctx = curId && curId !== "__live" ? `✏️ "${curLabel}" reportni tahrirlayapsiz (💾 Saqlash shu reportni yangilaydi) · ` : "";
     $("#toll-totals").textContent = `${ctx}${rows.length} qator · ✓ ${foll} followed · ⚠️ ${notf} not followed · ⏭️ ${skip} skipped · Est.diff $${est.toFixed(0)} · Charge $${charge.toFixed(0)}`;
     renderFoot();
   }
@@ -177,10 +177,15 @@
 
   async function save(btn) {
     btn.disabled = true; const old = btn.textContent; btn.textContent = "Saqlanmoqda…";
+    // On the Live board -> /api/toll. On an opened saved report -> update that report.
+    const onSaved = curId && curId !== "__live";
+    const url = onSaved ? "/api/toll-reports/" + curId : "/api/toll";
+    const method = onSaved ? "PUT" : "POST";
     try {
-      const res = await fetch("/api/toll", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows }) });
+      const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows }) });
       const j = await res.json();
       btn.textContent = j.ok ? "Saqlandi ✓" : "Xato"; setTimeout(() => (btn.textContent = old), 1500);
+      if (j.ok && onSaved) loadHistory();
     } catch (e) { alert("Xato: " + e.message); btn.textContent = old; }
     btn.disabled = false;
   }
@@ -257,7 +262,7 @@
     }
     try {
       const r = await (await fetch("/api/toll-reports/" + id)).json();
-      if (r && Array.isArray(r.rows)) { rows = r.rows; curId = id; curLabel = r.label || ""; ro = true; render(); }
+      if (r && Array.isArray(r.rows)) { rows = r.rows; curId = id; curLabel = r.label || ""; ro = false; render(); }
     } catch (e) { alert("Xato: " + e.message); }
   }
   async function saveReport(btn) {

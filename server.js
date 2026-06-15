@@ -966,6 +966,19 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify(r || { ok: false, error: "not found" }));
     return;
   }
+  if (tollRepMatch && req.method === "PUT") {
+    const body = await readBody(req);
+    const rec = tollReports.find((x) => x.id === tollRepMatch[1]);
+    if (!rec) { res.writeHead(404, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: "not found" })); return; }
+    if (body && Array.isArray(body.rows)) rec.rows = body.rows;
+    if (body && body.label != null) rec.label = String(body.label).trim();
+    if (body && (body.type === "weekly" || body.type === "monthly")) rec.type = body.type;
+    rec.updatedAt = new Date().toISOString();
+    saveTollReports();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, id: rec.id }));
+    return;
+  }
   if (tollRepMatch && req.method === "DELETE") {
     const i = tollReports.findIndex((x) => x.id === tollRepMatch[1]);
     if (i >= 0) { tollReports.splice(i, 1); saveTollReports(); }
