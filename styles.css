@@ -572,16 +572,29 @@ footer {
 .toll-help-card li { font-size: 13px; line-height: 1.7; color: var(--text); }
 .toll-help-card b { color: var(--text); }
 
-/* Toll header row: taller + subtle accent tint */
+/* Toll header — Excel look: yellow, bold, green Status, bigger + neat grid */
 .toll-table thead th {
-  padding: 14px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text);
-  background: rgba(77, 140, 255, 0.10);
-  border-bottom: 2px solid var(--accent);
+  padding: 12px 8px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #1a1a1a;
+  background: #ffe83d;
+  border: 1px solid #d4b400;
   text-align: center;
+  white-space: normal;
+  line-height: 1.15;
+  vertical-align: middle;
+  text-transform: none;
+  letter-spacing: 0;
 }
+.toll-table thead th.toll-status-h {
+  background: #4ea72e;
+  color: #fff;
+  border-color: #3c8a22;
+}
+/* Neat spreadsheet gridlines on the body */
+.toll-table td { border: 1px solid var(--border); }
+.toll-table tbody tr:nth-child(even) td { background: rgba(127, 127, 127, 0.05); }
 
 /* Status cell: dropdown + note button (centered) */
 .toll-status-cell { display: flex; align-items: center; justify-content: center; gap: 4px; }
