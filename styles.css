@@ -551,6 +551,14 @@ footer {
   background: var(--surface-2); border: 1px solid var(--border); color: var(--text-mute); border-radius: 6px; }
 .unit-note:hover { border-color: var(--accent); color: var(--text); }
 .unit-note.has { background: rgba(245, 158, 11, 0.18); border-color: #f59e0b; color: #f59e0b; }
+.note-modal { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(8, 12, 28, 0.55); }
+.note-modal.hidden { display: none; }
+.note-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; width: min(92vw, 440px); box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4); }
+.note-card h3 { margin: 0 0 12px; font-size: 16px; color: var(--text); }
+#note-text { width: 100%; box-sizing: border-box; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 10px 12px; font-size: 14px; resize: vertical; font-family: inherit; }
+#note-text:focus { outline: none; border-color: var(--accent); }
+.note-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.note-actions .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 
 /* Toll controls: separators + selects */
 .toll-sep { display: inline-block; width: 1px; height: 22px; background: var(--border); margin: 0 3px; vertical-align: middle; }

@@ -203,19 +203,28 @@ function render() {
     b.addEventListener("click", () => clearStop(b.dataset.unit));
   });
   tbody.querySelectorAll(".unit-note").forEach(b => {
-    b.addEventListener("click", () => editUnitNote(b.dataset.noteunit));
+    b.addEventListener("click", () => openNoteModal(b.dataset.noteunit));
   });
 }
 
-async function editUnitNote(unit) {
+let noteUnit = null;
+function openNoteModal(unit) {
+  noteUnit = unit;
   const row = fleet.find(x => x.unit === unit);
-  const cur = row ? (row.note || "") : "";
-  const v = prompt(`Unit ${unit} — note (masalan: "exit bilan", "call qilmaslik"):`, cur);
-  if (v === null) return;
-  const note = v.trim();
+  $("#note-title").textContent = `Unit ${unit} — note`;
+  $("#note-text").value = row ? (row.note || "") : "";
+  $("#note-modal").classList.remove("hidden");
+  setTimeout(() => $("#note-text").focus(), 30);
+}
+function closeNoteModal() { $("#note-modal").classList.add("hidden"); noteUnit = null; }
+async function saveNoteModal() {
+  if (!noteUnit) return;
+  const unit = noteUnit, note = $("#note-text").value.trim();
   try {
     await fetch("/api/unit-note", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unit, note }) });
+    const row = fleet.find(x => x.unit === unit);
     if (row) row.note = note;
+    closeNoteModal();
     render();
   } catch (e) { alert("Xato: " + e.message); }
 }
@@ -556,6 +565,12 @@ if (logoutBtn) logoutBtn.addEventListener("click", async () => {
   try { await fetch("/api/logout", { method: "POST" }); } catch {}
   window.location.href = "/login";
 });
+
+$("#note-save").addEventListener("click", saveNoteModal);
+$("#note-cancel").addEventListener("click", closeNoteModal);
+$("#note-modal").addEventListener("click", (e) => { if (e.target.id === "note-modal") closeNoteModal(); });
+$("#note-text").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) saveNoteModal(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#note-modal").classList.contains("hidden")) closeNoteModal(); });
 
 const priceBtn = $("#price-upload-btn");
 if (priceBtn) priceBtn.addEventListener("click", () => $("#price-file").click());
