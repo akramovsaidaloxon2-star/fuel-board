@@ -547,10 +547,12 @@ footer {
 
 /* Per-unit note button on the fuel board */
 .note-cell { text-align: center; }
+.note-cell.has-note { background: rgba(245, 158, 11, 0.18); box-shadow: inset 3px 0 0 #f59e0b; }
 .unit-note { height: 26px; min-width: 30px; padding: 0; font-size: 14px; line-height: 1; cursor: pointer;
   background: var(--surface-2); border: 1px solid var(--border); color: var(--text-mute); border-radius: 6px; }
-.unit-note:hover { border-color: var(--accent); color: var(--text); }
-.unit-note.has { background: rgba(245, 158, 11, 0.18); border-color: #f59e0b; color: #f59e0b; }
+.unit-note:not(.has) { opacity: .45; }            /* empty notes stay faint */
+.unit-note:hover { border-color: var(--accent); color: var(--text); opacity: 1; }
+.unit-note.has { background: #f59e0b; border-color: #d97706; }   /* filled amber = has a note */
 .note-modal { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(8, 12, 28, 0.55); }
 .note-modal.hidden { display: none; }
 .note-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; width: min(92vw, 440px); box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4); }

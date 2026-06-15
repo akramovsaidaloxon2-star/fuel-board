@@ -157,7 +157,7 @@ function render() {
           <div class="driver-name">${r.driver}</div>
           <div class="driver-meta">${r.phone || ""}</div>
         </td>
-        <td class="note-cell"><button class="unit-note ${r.note ? "has" : ""}" data-noteunit="${esc(r.unit)}" title="${r.note ? esc(r.note) : "Note qo‘shish"}">📝</button></td>
+        <td class="note-cell ${r.note ? "has-note" : ""}"><button class="unit-note ${r.note ? "has" : ""}" data-noteunit="${esc(r.unit)}" title="${r.note ? esc(r.note) : "Note qo‘shish"}">📝</button></td>
         <td>
           <div class="location">${r.location}</div>
           <div class="location-meta">${r.state}</div>
