@@ -1090,7 +1090,21 @@ async function initDurable() {
   const r = await ghLoad("reports_data.json");
   if (Array.isArray(r)) reports = r;
   const s = await ghLoad("fuel_series.json");
-  if (s && typeof s === "object") fuelSeries = s;
+  if (s && typeof s === "object") {
+    fuelSeries = s;
+    // Seed the last-known fuel cache from the durable series, so parked trucks
+    // still show their most recent reading after a restart/deploy (not "No data yet").
+    let seeded = 0;
+    for (const u in fuelSeries) {
+      const arr = fuelSeries[u];
+      if (Array.isArray(arr) && arr.length && !fuelHist[u]) {
+        const last = arr[arr.length - 1];
+        if (last && typeof last[1] === "number") { fuelHist[u] = { fuel: last[1], at: new Date(last[0]).toISOString() }; seeded++; }
+      }
+    }
+    if (seeded) { saveFuelHist(); cache.at = 0; } // invalidate fuel cache so the seed shows
+    console.log(`  Last-known seeded:   ${seeded} units from durable series`);
+  }
   const o = await ghLoad("odo_daily.json");
   if (o && typeof o === "object") odoDaily = o;
   const tl = await ghLoad("toll_data.json");
