@@ -510,7 +510,6 @@ footer {
 }
 
 /* --- Fuel stop column (assign a station per unit, multi-brand) --- */
-.role-worker .col-fuelstop { display: none; }   /* manager-only column */
 .fs-assign-form { display: flex; align-items: center; gap: 4px; }
 .fs-brand { background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
   border-radius: 6px; padding: 5px 4px; font-size: 12px; max-width: 86px; }
@@ -605,7 +604,6 @@ footer {
 .toll-note:hover { border-color: var(--accent); color: var(--text); }
 .toll-note.has { background: rgba(245, 158, 11, 0.18); border-color: #f59e0b; color: #f59e0b; }
 
-/* Pilot daily price upload bar (manager-only) */
+/* Pilot daily price upload bar */
 .price-bar { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; }
-.role-worker .price-bar { display: none; }
 .price-label { color: var(--text-dim); font-size: 13px; }

@@ -759,8 +759,8 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Reports, Toll, fuel-check, perf-auto, fuel-stop and fuel-price are manager-only.
-  if (/^\/api\/(reports|toll|fuel-check|perf-auto|fuel-stop|fuel-price)\b/.test(req.url)) {
+  // Only the Toll board is manager-only; workers get every other feature.
+  if (/^\/api\/toll\b/.test(req.url)) {
     if (!mgrOnly(req, res)) return;
   }
 

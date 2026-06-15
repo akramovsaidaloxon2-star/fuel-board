@@ -229,7 +229,6 @@ async function clearStop(unit) {
 }
 
 async function loadFsBoard() {
-  if (ROLE !== "manager") return;
   try {
     const r = await fetch("/api/fuel-stop/board");
     if (r.ok) { fsBoard = await r.json(); render(); }
@@ -237,7 +236,6 @@ async function loadFsBoard() {
 }
 
 async function loadFuelPrice() {
-  if (ROLE !== "manager") return;
   try {
     const r = await fetch("/api/fuel-price");
     if (!r.ok) return;
@@ -547,22 +545,18 @@ if (priceBtn) priceBtn.addEventListener("click", () => $("#price-file").click())
 const priceFileInput = $("#price-file");
 if (priceFileInput) priceFileInput.addEventListener("change", (e) => { if (e.target.files[0]) uploadPriceFile(e.target.files[0]); });
 
-// Role-based access: workers only see Fuel board / Map / Idle report,
-// and the manager-only Fuel stop column is hidden for them (CSS .role-worker).
+// Role-based access: workers get everything EXCEPT the Toll board.
 fetch("/api/me").then((r) => r.json()).then((j) => {
   ROLE = j.role || "manager";
   document.body.classList.toggle("role-worker", ROLE === "worker");
   if (ROLE === "worker") {
-    ["reports", "ranking", "toll", "coverage"].forEach((v) => {
-      const b = document.querySelector(`.tab[data-view="${v}"]`);
-      if (b) b.remove();
-    });
+    const b = document.querySelector(`.tab[data-view="toll"]`);
+    if (b) b.remove();
     const badge = document.querySelector(".subtitle");
     if (badge) badge.textContent = "Worker view";
-  } else {
-    loadFsBoard();
-    loadFuelPrice();
   }
+  loadFsBoard();
+  loadFuelPrice();
 }).catch(() => {});
 
 setupTabs();
