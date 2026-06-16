@@ -2,7 +2,7 @@ services:
   - type: web
     name: fuel-board
     runtime: node
-    plan: free
+    plan: standard
     buildCommand: npm install
     startCommand: node server.js
     autoDeploy: true
