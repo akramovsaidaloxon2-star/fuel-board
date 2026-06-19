@@ -87,18 +87,33 @@ async function ghLoad(file) {
   } catch (e) { console.error("ghLoad err", file, e.message); return null; }
 }
 const ghTimers = {};
+// PUT a JSON file to the durable repo. If GitHub rejects the write because our
+// cached sha is stale/missing (409 conflict or 422), re-fetch the latest sha
+// and retry once — otherwise a single conflict would freeze that file forever
+// (so later edits/removals never persist and reappear after a restart).
+async function ghPut(file, obj) {
+  const content = Buffer.from(JSON.stringify(obj)).toString("base64");
+  const doPut = async () => {
+    const body = { message: `update ${file}`, content };
+    if (ghSha[file]) body.sha = ghSha[file];
+    return fetch(`https://api.github.com/repos/${GH_REPO}/contents/${file}`, { method: "PUT", headers: { ...ghHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  };
+  let r = await doPut();
+  if (r.status === 409 || r.status === 422) {
+    try {
+      const g = await fetch(`https://api.github.com/repos/${GH_REPO}/contents/${file}`, { headers: ghHeaders() });
+      if (g.ok) ghSha[file] = (await g.json()).sha;
+      else if (g.status === 404) delete ghSha[file]; // file gone — create fresh
+    } catch {}
+    r = await doPut();
+  }
+  if (!r.ok) { console.error("ghSave", file, r.status, (await r.text()).slice(0, 140)); return; }
+  ghSha[file] = (await r.json()).content.sha;
+}
 function ghSave(file, obj) {
   if (!GH_ON) return;
   clearTimeout(ghTimers[file]);
-  ghTimers[file] = setTimeout(async () => {
-    try {
-      const body = { message: `update ${file}`, content: Buffer.from(JSON.stringify(obj)).toString("base64") };
-      if (ghSha[file]) body.sha = ghSha[file];
-      const r = await fetch(`https://api.github.com/repos/${GH_REPO}/contents/${file}`, { method: "PUT", headers: { ...ghHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      if (!r.ok) { console.error("ghSave", file, r.status, (await r.text()).slice(0, 140)); return; }
-      ghSha[file] = (await r.json()).content.sha;
-    } catch (e) { console.error("ghSave err", file, e.message); }
-  }, 4000);
+  ghTimers[file] = setTimeout(() => { ghPut(file, obj).catch((e) => console.error("ghSave err", file, e.message)); }, 4000);
 }
 
 // --- Simple in-memory cache so we don't hammer the Motive API ---
