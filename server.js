@@ -86,7 +86,10 @@ async function ghLoad(file) {
     return JSON.parse(Buffer.from(j.content, "base64").toString("utf8"));
   } catch (e) { console.error("ghLoad err", file, e.message); return null; }
 }
-const ghTimers = {};
+const ghTimers = {}, ghPending = {}, ghLastSave = {};
+// High-frequency, webhook-driven files push to GitHub at most once per 5 min
+// (cuts outbound bandwidth a lot). User-triggered files stay near-immediate.
+const GH_MIN = { "fuel_series.json": 300000, "odo_daily.json": 300000 };
 // PUT a JSON file to the durable repo. If GitHub rejects the write because our
 // cached sha is stale/missing (409 conflict or 422), re-fetch the latest sha
 // and retry once — otherwise a single conflict would freeze that file forever
@@ -112,8 +115,15 @@ async function ghPut(file, obj) {
 }
 function ghSave(file, obj) {
   if (!GH_ON) return;
-  clearTimeout(ghTimers[file]);
-  ghTimers[file] = setTimeout(() => { ghPut(file, obj).catch((e) => console.error("ghSave err", file, e.message)); }, 4000);
+  ghPending[file] = obj;                       // always remember the latest object
+  if (ghTimers[file]) return;                  // a flush is already scheduled
+  const wait = Math.max((GH_MIN[file] || 4000) - (Date.now() - (ghLastSave[file] || 0)), 800);
+  ghTimers[file] = setTimeout(() => {
+    ghTimers[file] = null;
+    ghLastSave[file] = Date.now();
+    const data = ghPending[file]; delete ghPending[file];
+    ghPut(file, data).catch((e) => console.error("ghSave err", file, e.message));
+  }, wait);
 }
 
 // --- Simple in-memory cache so we don't hammer the Motive API ---
