@@ -10,6 +10,14 @@
 
   function fmt(n, d = 0) { return n == null ? "—" : Number(n).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }); }
 
+  // Canonical unit number: strip a leading BOM/# and any leading zeros so that
+  // "0007", "007", "#7" and "7" all match the same truck across the fuel report,
+  // the performance CSV and Motive. Non-numeric ids (e.g. "TRK7") are left as-is.
+  function normUnit(s) {
+    s = String(s == null ? "" : s).replace(/^\uFEFF/, "").trim().replace(/^#/, "");
+    return /^\d+$/.test(s) ? String(parseInt(s, 10)) : s;
+  }
+
   // ---- Parsing ----
   async function parseFuel(file) {
     const buf = await file.arrayBuffer();
@@ -18,7 +26,7 @@
     const agg = {}; const tx = []; let minD = null, maxD = null;
     for (const r of rows) {
       const item = String(r.Item || "").toUpperCase();
-      const unit = String(r.Unit == null ? "" : r.Unit).trim();
+      const unit = normUnit(r.Unit);
       const d = r["Tran Date"];
       const ds = d ? String(d).slice(0, 10) : null;
       if (ds) { if (!minD || ds < minD) minD = ds; if (!maxD || ds > maxD) maxD = ds; }
@@ -35,21 +43,28 @@
   }
 
   async function parsePerf(file) {
-    const text = await file.text();
+    let text = await file.text();
+    text = text.replace(/^\uFEFF/, ""); // strip UTF-8 BOM (Excel/Motive exports add it)
     const lines = text.split(/\r?\n/).filter((l) => l.trim());
-    const hdr = lines[0].split(",");
-    const vi = hdr.findIndex((h) => /^Vehicle$/i.test(h.trim()));
-    const di = hdr.findIndex((h) => /Total Distance/i.test(h));
-    const ii = hdr.findIndex((h) => /Idled Fuel/i.test(h));
-    const dri = hdr.findIndex((h) => /^Driver$/i.test(h.trim()));
+    if (!lines.length) { warn("Performance CSV bo'sh."); return; }
+    const cell = (x) => String(x == null ? "" : x).replace(/^\uFEFF/, "").trim().replace(/^"|"$/g, "").trim();
+    const hdr = lines[0].split(",").map(cell);
+    // Tolerant header detection: "Vehicle" / "Vehicle Number" / "Unit" / "Truck".
+    let vi = hdr.findIndex((h) => /^vehicle\b/i.test(h));
+    if (vi < 0) vi = hdr.findIndex((h) => /\b(unit|truck)\b/i.test(h));
+    const di = hdr.findIndex((h) => /total distance|distance|miles/i.test(h));
+    const ii = hdr.findIndex((h) => /idled?\s*fuel/i.test(h));
+    const dri = hdr.findIndex((h) => /^driver\b/i.test(h));
+    if (vi < 0) { warn("Performance CSV'da 'Vehicle' ustuni topilmadi. Ustunlar: " + hdr.join(" | ")); return; }
     const agg = {};
     for (let k = 1; k < lines.length; k++) {
-      const c = lines[k].split(","); const v = (c[vi] || "").trim(); if (!v) continue;
-      const mi = parseFloat(c[di]) || 0;
+      const c = lines[k].split(",").map(cell);
+      const v = normUnit(c[vi]); if (!v) continue;
+      const mi = di >= 0 ? parseFloat(c[di]) || 0 : 0;
       if (!agg[v]) agg[v] = { miles: 0, idle: 0, driver: "", _dm: -1 };
       agg[v].miles += mi;
-      agg[v].idle += parseFloat(c[ii]) || 0;
-      const drv = (c[dri] || "").trim();
+      agg[v].idle += ii >= 0 ? parseFloat(c[ii]) || 0 : 0;
+      const drv = dri >= 0 ? cell(c[dri]) : "";
       if (drv && mi > agg[v]._dm) { agg[v]._dm = mi; agg[v].driver = drv; } // primary driver = most miles
     }
     perfAgg = agg;
@@ -65,7 +80,7 @@
       const j = await res.json();
       if (!j.ok) throw new Error(j.error || "auto error");
       const agg = {};
-      Object.keys(j.units).forEach((u) => { agg[u] = { miles: j.units[u].miles, idle: j.units[u].idle, driver: "" }; });
+      Object.keys(j.units).forEach((u) => { agg[normUnit(u)] = { miles: j.units[u].miles, idle: j.units[u].idle, driver: "" }; });
       perfAgg = agg;
       const withMiles = Object.values(agg).filter((x) => x.miles != null).length;
       $("#perf-name").textContent = `Motive (avto) · ${Object.keys(agg).length} unit · ${withMiles} ta miles bilan`;
@@ -77,9 +92,7 @@
 
   // ---- Compute ----
   function lookupPerf(unit) {
-    if (perfAgg[unit]) return perfAgg[unit];
-    if (/^\d+$/.test(unit) && perfAgg[unit.padStart(4, "0")]) return perfAgg[unit.padStart(4, "0")];
-    return null;
+    return perfAgg[normUnit(unit)] || perfAgg[unit] || null;
   }
 
   function generate() {
