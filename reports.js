@@ -18,6 +18,25 @@
     return /^\d+$/.test(s) ? String(parseInt(s, 10)) : s;
   }
 
+  // RFC-4180 CSV splitter: respects "quoted, fields" so a thousands-separated
+  // number like "2,136.27" stays one cell instead of splitting into two.
+  function splitCSV(line) {
+    const out = []; let cur = "", q = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (q) {
+        if (ch === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; }
+        else cur += ch;
+      } else if (ch === '"') q = true;
+      else if (ch === ",") { out.push(cur); cur = ""; }
+      else cur += ch;
+    }
+    out.push(cur);
+    return out;
+  }
+  // Parse a number that may carry commas / $ / spaces (e.g. "2,136.27", "$1,200").
+  const num = (x) => parseFloat(String(x == null ? "" : x).replace(/[,$\s]/g, "")) || 0;
+
   // ---- Parsing ----
   async function parseFuel(file) {
     const buf = await file.arrayBuffer();
@@ -47,8 +66,8 @@
     text = text.replace(/^\uFEFF/, ""); // strip UTF-8 BOM (Excel/Motive exports add it)
     const lines = text.split(/\r?\n/).filter((l) => l.trim());
     if (!lines.length) { warn("Performance CSV bo'sh."); return; }
-    const cell = (x) => String(x == null ? "" : x).replace(/^\uFEFF/, "").trim().replace(/^"|"$/g, "").trim();
-    const hdr = lines[0].split(",").map(cell);
+    const clean = (x) => String(x == null ? "" : x).replace(/^\uFEFF/, "").trim();
+    const hdr = splitCSV(lines[0]).map(clean);
     // Tolerant header detection: "Vehicle" / "Vehicle Number" / "Unit" / "Truck".
     let vi = hdr.findIndex((h) => /^vehicle\b/i.test(h));
     if (vi < 0) vi = hdr.findIndex((h) => /\b(unit|truck)\b/i.test(h));
@@ -58,13 +77,13 @@
     if (vi < 0) { warn("Performance CSV'da 'Vehicle' ustuni topilmadi. Ustunlar: " + hdr.join(" | ")); return; }
     const agg = {};
     for (let k = 1; k < lines.length; k++) {
-      const c = lines[k].split(",").map(cell);
+      const c = splitCSV(lines[k]);
       const v = normUnit(c[vi]); if (!v) continue;
-      const mi = di >= 0 ? parseFloat(c[di]) || 0 : 0;
+      const mi = di >= 0 ? num(c[di]) : 0;
       if (!agg[v]) agg[v] = { miles: 0, idle: 0, driver: "", _dm: -1 };
       agg[v].miles += mi;
-      agg[v].idle += ii >= 0 ? parseFloat(c[ii]) || 0 : 0;
-      const drv = dri >= 0 ? cell(c[dri]) : "";
+      agg[v].idle += ii >= 0 ? num(c[ii]) : 0;
+      const drv = dri >= 0 ? clean(c[dri]) : "";
       if (drv && mi > agg[v]._dm) { agg[v]._dm = mi; agg[v].driver = drv; } // primary driver = most miles
     }
     perfAgg = agg;
