@@ -169,12 +169,15 @@
         <button class="btn" id="rep-generate">Generate</button>
         <button class="btn" id="rep-save" disabled>Save report</button>
         <button class="btn" id="rep-export" disabled>Export Excel</button>
+        <button class="btn" id="rep-update" style="display:none">💾 Save changes</button>
+        <button class="btn" id="rep-delete" style="display:none">🗑 Delete report</button>
         <select id="rep-history-select" class="rep-hsel">
           <option value="">📁 Saqlangan reportni oching…</option>
         </select>
       </div>
 
       <div id="rep-warn" class="rep-warn hidden"></div>
+      <div id="rep-unmatched" class="rep-unmatched hidden"></div>
 
       <section class="stats" id="rep-stats" style="display:none">
         <div class="stat-card total"><span class="stat-label">Units</span><span class="stat-value" id="rep-units">0</span></div>
@@ -204,6 +207,7 @@
             <th data-col="mpg">MPG<span class="arrow"></span></th>
             <th data-col="cpm">CPM<span class="arrow"></span></th>
             <th data-col="idleGal">Idle gal<span class="arrow"></span></th>
+            <th class="rep-edit-col"></th>
           </tr></thead>
           <tbody id="rep-rows"></tbody>
         </table>
