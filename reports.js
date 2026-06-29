@@ -76,9 +76,11 @@
   }
 
   // ---- Compute ----
+  let usedPerf = new Set();   // Motive units matched to a fuel-card unit
   function lookupPerf(unit) {
-    if (perfAgg[unit]) return perfAgg[unit];
-    if (/^\d+$/.test(unit) && perfAgg[unit.padStart(4, "0")]) return perfAgg[unit.padStart(4, "0")];
+    if (perfAgg[unit]) { usedPerf.add(unit); return perfAgg[unit]; }
+    const pad = /^\d+$/.test(unit) ? unit.padStart(4, "0") : null;
+    if (pad && perfAgg[pad]) { usedPerf.add(pad); return perfAgg[pad]; }
     return null;
   }
 
@@ -86,6 +88,7 @@
     if (!fuelAgg) { warn("Fuel report (Excel) yuklang."); return; }
     if (!perfAgg) { warn("Driver Fuel Performance (CSV) yuklang."); return; }
     const rows = [], unmatched = [];
+    usedPerf = new Set();
     let tQty = 0, tAmt = 0, tIdle = 0, tMiles = 0;
     Object.keys(fuelAgg).sort().forEach((u) => {
       const f = fuelAgg[u], p = lookupPerf(u);
@@ -103,7 +106,10 @@
       if (pm == null) unmatched.push(u);
       rows.push({ unit: u, driver: (p && p.driver) || "", qty: +f.qty.toFixed(2), amt: +f.amt.toFixed(2), ppg: ppg != null ? +ppg.toFixed(2) : null, miles, mpg, cpm, idleGal: idle });
     });
-    computed = { rows, unmatched, totals: {
+    const perfOrphans = Object.keys(perfAgg)
+      .filter((k) => !usedPerf.has(k) && perfAgg[k] && perfAgg[k].miles != null)
+      .map((k) => ({ unit: k, miles: +perfAgg[k].miles, idle: perfAgg[k].idle != null ? +perfAgg[k].idle : null }));
+    computed = { rows, unmatched, perfOrphans, totals: {
       qty: +tQty.toFixed(1), amt: +tAmt.toFixed(2), idle: +tIdle.toFixed(1), miles: +tMiles.toFixed(1),
       ppg: tQty ? +(tAmt / tQty).toFixed(2) : null, mpg: tQty ? +(tMiles / tQty).toFixed(2) : null, cpm: tMiles ? +(tAmt / tMiles).toFixed(2) : null,
     } };
@@ -162,11 +168,25 @@
     } else box.classList.add("hidden");
 
     renderRows();
+    renderUnmatched();
     $("#rep-table").style.display = "";
     $("#rep-save").disabled = false;
     $("#rep-export").disabled = false;
-    if (unmatched.length) warn("Motive'da topilmagan (miles yo'q): " + unmatched.join(", "));
-    else clearWarn();
+    clearWarn();
+  }
+
+  function renderUnmatched() {
+    const um = (computed && computed.unmatched) || [];
+    const orphans = (computed && computed.perfOrphans) || [];
+    const el = $("#rep-unmatched");
+    if (!el) return;
+    if (!um.length && !orphans.length) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+    el.classList.remove("hidden");
+    el.innerHTML = `
+      <h3>⚠️ Match kelmadi — qo'lda to'g'rilang</h3>
+      ${um.length ? `<div class="um-row"><span class="um-lbl">Fuel-kartada bor, Motive miles yo'q:</span> ${um.map((u) => `<span class="um-pill">${esc(u)}</span>`).join("")}</div>` : ""}
+      ${orphans.length ? `<div class="um-row"><span class="um-lbl">Motive'da bor (miles), fuel-karta mos kelmadi:</span> ${orphans.map((o) => `<span class="um-pill orphan">${esc(o.unit)} · ${fmt(o.miles, 0)} mi${o.idle != null ? " · " + fmt(o.idle, 0) + " idle gal" : ""}</span>`).join("")}</div>` : ""}
+      <p class="cov-note">Bir xil truck bo'lsa (masalan <b>0007 = 007</b>): jadvalni tahrirlab, o'sha unit qatoriga Motive miles'ini qo'lda kiriting — MPG avtomatik hisoblanadi.</p>`;
   }
 
   const esc = (v) => String(v == null ? "" : v).replace(/"/g, "&quot;");
