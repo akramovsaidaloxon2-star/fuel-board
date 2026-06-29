@@ -965,6 +965,18 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify(r || { ok: false, error: "not found" }));
     return;
   }
+  if (reportMatch && req.method === "PUT") {
+    const body = await readBody(req);
+    const rec = reports.find((x) => x.id === reportMatch[1]);
+    if (!rec) { res.writeHead(404, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: "not found" })); return; }
+    if (body && Array.isArray(body.rows)) rec.rows = body.rows;
+    if (body && body.totals) rec.totals = body.totals;
+    rec.updatedAt = new Date().toISOString();
+    saveReports();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, id: rec.id }));
+    return;
+  }
   if (reportMatch && req.method === "DELETE") {
     const i = reports.findIndex((x) => x.id === reportMatch[1]);
     if (i >= 0) { reports.splice(i, 1); saveReports(); }

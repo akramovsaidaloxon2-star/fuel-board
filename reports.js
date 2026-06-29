@@ -109,6 +109,8 @@
     } };
     reviews = {};            // fresh report — no reviews yet
     currentReportId = null;  // not saved yet; reviews persist on Save
+    $("#rep-update").style.display = "none";  // edit/delete only for saved reports
+    $("#rep-delete").style.display = "none";
     render();
   }
 
@@ -167,7 +169,23 @@
     else clearWarn();
   }
 
+  const esc = (v) => String(v == null ? "" : v).replace(/"/g, "&quot;");
+  function recalcRow(r) {
+    r.ppg = (r.amt != null && r.qty) ? +(r.amt / r.qty).toFixed(3) : null;
+    r.mpg = (r.miles != null && r.qty) ? +(r.miles / r.qty).toFixed(2) : null;
+    r.cpm = (r.amt != null && r.miles) ? +(r.amt / r.miles).toFixed(3) : null;
+  }
+  function onEditInput(e) {
+    const el = e.target, i = +el.dataset.i, f = el.dataset.f, r = computed.rows[i];
+    if (!r) return;
+    if (f === "unit") r.unit = el.value.trim();
+    else r[f] = el.value === "" ? null : parseFloat(el.value);
+    recalcRow(r);
+    const setD = (k, v) => { const c = document.querySelector(`[data-d="${k}-${i}"]`); if (c) c.textContent = (v == null ? "—" : v); };
+    setD("ppg", r.ppg); setD("mpg", r.mpg); setD("cpm", r.cpm);
+  }
   function renderRows() {
+    const editMode = !!currentReportId;
     const rows = [...computed.rows].sort((a, b) => {
       let x = a[sortCol], y = b[sortCol];
       if (x == null && y == null) return 0;
@@ -175,9 +193,23 @@
       if (sortCol === "unit") return String(x).localeCompare(String(y)) * sortDir;
       return (x - y) * sortDir;
     });
-    $("#rep-rows").innerHTML = rows.map((r) => `
-      <tr>
-        <td><span class="unit-pill">${r.unit}</span></td>
+    $("#rep-rows").innerHTML = rows.map((r) => {
+      const i = computed.rows.indexOf(r);
+      if (editMode) {
+        return `<tr>
+          <td><input class="rep-edit" data-i="${i}" data-f="unit" value="${esc(r.unit)}" style="width:60px"></td>
+          <td><input class="rep-edit" data-i="${i}" data-f="qty" type="number" value="${r.qty ?? ""}" style="width:72px"></td>
+          <td><input class="rep-edit" data-i="${i}" data-f="amt" type="number" value="${r.amt ?? ""}" style="width:84px"></td>
+          <td class="rep-d" data-d="ppg-${i}">${r.ppg ?? "—"}</td>
+          <td><input class="rep-edit" data-i="${i}" data-f="miles" type="number" value="${r.miles ?? ""}" style="width:72px"></td>
+          <td class="rep-d" data-d="mpg-${i}">${r.mpg ?? "—"}</td>
+          <td class="rep-d" data-d="cpm-${i}">${r.cpm ?? "—"}</td>
+          <td><input class="rep-edit" data-i="${i}" data-f="idleGal" type="number" value="${r.idleGal ?? ""}" style="width:60px"></td>
+          <td><button class="rep-row-del" data-i="${i}" title="Qatorni o'chirish">✕</button></td>
+        </tr>`;
+      }
+      return `<tr>
+        <td><span class="unit-pill">${esc(r.unit)}</span></td>
         <td>${fmt(r.qty, 1)}</td>
         <td>$${fmt(r.amt, 0)}</td>
         <td>${r.ppg ?? "—"}</td>
@@ -185,11 +217,44 @@
         <td class="${r.mpg != null && r.mpg < 6 ? "mpg bad" : (r.mpg >= 7.5 ? "mpg good" : "")}">${r.mpg ?? "—"}</td>
         <td>${r.cpm ?? "—"}</td>
         <td class="${r.idleGal >= 30 ? "idle high" : (r.idleGal >= 15 ? "idle mid" : "")}">${r.idleGal ?? "—"}</td>
-      </tr>`).join("");
+        <td></td>
+      </tr>`;
+    }).join("");
+    if (editMode) {
+      $("#rep-rows").querySelectorAll(".rep-edit").forEach((el) => el.addEventListener("input", onEditInput));
+      $("#rep-rows").querySelectorAll(".rep-row-del").forEach((b) => b.addEventListener("click", () => { computed.rows.splice(+b.dataset.i, 1); render(); }));
+    }
     document.querySelectorAll("#rep-table th").forEach((th) => {
       const a = th.querySelector(".arrow");
       if (a) a.textContent = th.dataset.col === sortCol ? (sortDir === 1 ? " ▲" : " ▼") : "";
     });
+  }
+  async function saveReportEdits(btn) {
+    if (!currentReportId || !computed) return;
+    const T = computed.rows.reduce((a, r) => ({ qty: a.qty + (r.qty || 0), amt: a.amt + (r.amt || 0), miles: a.miles + (r.miles || 0), idle: a.idle + (r.idleGal || 0) }), { qty: 0, amt: 0, miles: 0, idle: 0 });
+    const totals = { qty: +T.qty.toFixed(1), amt: +T.amt.toFixed(2), miles: Math.round(T.miles), idleGal: +T.idle.toFixed(1), ppg: T.qty ? +(T.amt / T.qty).toFixed(3) : null, mpg: T.qty ? +(T.miles / T.qty).toFixed(2) : null, cpm: T.miles ? +(T.amt / T.miles).toFixed(3) : null };
+    computed.totals = totals;
+    btn.disabled = true; const old = btn.textContent; btn.textContent = "Saqlanmoqda…";
+    try {
+      const res = await fetch("/api/reports/" + currentReportId, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows: computed.rows, totals }) });
+      const j = await res.json();
+      btn.textContent = j.ok ? "✓ Saqlandi" : "Xato"; setTimeout(() => (btn.textContent = old), 1600);
+      render(); loadHistory();
+    } catch (e) { alert("Xato: " + e.message); btn.textContent = old; }
+    btn.disabled = false;
+  }
+  async function deleteReport(id) {
+    if (!id) return;
+    if (!confirm("Shu reportni butunlay o'chirasizmi? (qaytarib bo'lmaydi)")) return;
+    try {
+      await fetch("/api/reports/" + id, { method: "DELETE" });
+      if (currentReportId === id) {
+        currentReportId = null; computed = null;
+        $("#rep-table").style.display = "none"; $("#rep-stats").style.display = "none"; $("#rep-lowmpg").classList.add("hidden");
+        $("#rep-update").style.display = "none"; $("#rep-delete").style.display = "none";
+      }
+      loadHistory();
+    } catch (e) { alert("Xato: " + e.message); }
   }
 
   function warn(msg) { const w = $("#rep-warn"); w.textContent = "⚠️ " + msg; w.classList.remove("hidden"); }
@@ -291,11 +356,13 @@
     if (!list.length) { el.innerHTML = '<p class="cov-note">Hali saqlangan report yo\'q.</p>'; return; }
     el.innerHTML = `<div class="cov-grid">` + list.map((r) => `
       <div class="cov-item rep-hist" data-id="${r.id}">
+        <button class="rep-card-del" data-id="${r.id}" title="Reportni o'chirish">✕</button>
         <span class="u">${r.periodStart || "?"} → ${r.periodEnd || "?"}</span>
         <span class="m">${r.type} · ${r.unitCount} unit</span>
         <span class="a">${r.totals ? "$" + fmt(r.totals.amt, 0) + " · " + fmt(r.totals.qty, 0) + " gal" : ""}</span>
       </div>`).join("") + `</div>`;
     el.querySelectorAll(".rep-hist").forEach((it) => it.addEventListener("click", () => openSaved(it.dataset.id)));
+    el.querySelectorAll(".rep-card-del").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); deleteReport(b.dataset.id); }));
   }
 
   async function openSaved(id) {
@@ -310,6 +377,8 @@
     if (r.type) $("#rep-type").value = r.type;
     $("#rep-period").textContent = period.start ? period.start + " → " + period.end : "";
     render();
+    $("#rep-update").style.display = "";   // saved report -> editable
+    $("#rep-delete").style.display = "";
     $("#rep-stats").scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -399,6 +468,8 @@
     $("#rep-auto").addEventListener("click", (e) => autoFetch(e.currentTarget));
     $("#rep-save").addEventListener("click", save);
     $("#rep-export").addEventListener("click", exportXlsx);
+    $("#rep-update").addEventListener("click", (e) => saveReportEdits(e.currentTarget));
+    $("#rep-delete").addEventListener("click", () => deleteReport(currentReportId));
     $("#rep-history-select").addEventListener("change", (e) => openSaved(e.target.value));
     document.querySelectorAll("#rep-table th").forEach((th) => th.addEventListener("click", () => {
       const col = th.dataset.col; if (!col) return;
