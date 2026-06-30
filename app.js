@@ -5,6 +5,8 @@ let ROLE = "manager";          // set from /api/me
 let fsBoard = {};              // unit -> { station, miles, etaMin, ... } for assigned stops
 let priceMap = {};             // normalized store# -> { your, retail, disc, sav, city, st }
 let priceDate = null;          // effective date of the loaded Pilot price report
+const ARRIVE_MI = 3;           // notify when an assigned truck is within this many miles of its stop
+let arrivedNotified = {};      // unit -> already alerted for this arrival
 const BRANDS = { pilot: "Pilot", loves: "Love's", ta: "TA/Petro" };
 
 const normNum = (s) => {
@@ -128,7 +130,8 @@ function render() {
       const a = r.assignedStop;                 // { brand, num }
       const label = BRANDS[a.brand] || a.brand;
       const info = fsBoard[r.unit];
-      const miles = info && info.miles != null ? `${info.miles} mi`
+      const miles = info && info.miles != null
+        ? (info.miles <= ARRIVE_MI ? "✅ keldi" : `${info.miles} mi`)
         : (info && info.error ? "no GPS" : "…");
       const near = info && info.miles != null && info.miles <= 15;
       const tip = info ? esc(`${info.name || label} #${a.num} · ${info.city || ""}, ${info.st || ""}`) : `${label} #${a.num}`;
@@ -287,7 +290,53 @@ async function clearStop(unit) {
 async function loadFsBoard() {
   try {
     const r = await fetch("/api/fuel-stop/board");
-    if (r.ok) { fsBoard = await r.json(); render(); }
+    if (r.ok) { fsBoard = await r.json(); checkArrivals(); render(); }
+  } catch {}
+}
+
+// Alert once when an assigned truck reaches its stop (within ARRIVE_MI miles).
+function checkArrivals() {
+  for (const unit in fsBoard) {
+    const info = fsBoard[unit];
+    if (info && info.miles != null && info.miles <= ARRIVE_MI) {
+      if (!arrivedNotified[unit]) { arrivedNotified[unit] = true; notifyArrival(unit, info); }
+    } else if (info && info.miles != null && info.miles > 10) {
+      delete arrivedNotified[unit];   // moved away -> a later arrival re-alerts
+    }
+  }
+  for (const u in arrivedNotified) if (!fsBoard[u]) delete arrivedNotified[u]; // unassigned
+}
+
+function notifyArrival(unit, info) {
+  const place = `${info.brandLabel || "Pilot"} #${info.station}${info.city ? " · " + info.city + ", " + info.st : ""}`;
+  const msg = `Unit ${unit} yetib keldi → ${place}`;
+  showToast("🅿️ " + msg);
+  beep();
+  try { if (window.Notification && Notification.permission === "granted") new Notification("MOVEX — Fuel stop", { body: msg }); } catch {}
+}
+
+function showToast(text) {
+  let wrap = document.getElementById("toasts");
+  if (!wrap) { wrap = document.createElement("div"); wrap.id = "toasts"; wrap.className = "toasts"; document.body.appendChild(wrap); }
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.innerHTML = `<span>${esc(text)}</span><button class="toast-x" aria-label="close">✕</button>`;
+  t.querySelector(".toast-x").addEventListener("click", () => t.remove());
+  wrap.appendChild(t);
+  setTimeout(() => t.classList.add("show"), 20);
+  setTimeout(() => { t.classList.remove("show"); setTimeout(() => t.remove(), 400); }, 15000);
+}
+
+function beep() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ac = new Ctx(), o = ac.createOscillator(), g = ac.createGain();
+    o.type = "sine"; o.frequency.value = 880; o.connect(g); g.connect(ac.destination);
+    g.gain.setValueAtTime(0.0001, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.25, ac.currentTime + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.5);
+    o.start(); o.stop(ac.currentTime + 0.5);
   } catch {}
 }
 
@@ -624,3 +673,5 @@ fetch("/api/me").then((r) => r.json()).then((j) => {
 setupTabs();
 loadData();
 setInterval(loadData, 60000);
+// Ask once for desktop-notification permission (used for fuel-stop arrivals).
+try { if (window.Notification && Notification.permission === "default") Notification.requestPermission(); } catch {}
