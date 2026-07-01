@@ -595,6 +595,20 @@ footer {
 .toast-x { background: none; border: none; color: #fff; cursor: pointer; font-size: 13px; line-height: 1; opacity: .85; }
 .toast-x:hover { opacity: 1; }
 
+/* Truck route check */
+.rc-card { margin-top: 16px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+.rc-verdict { font-size: 22px; font-weight: 800; margin-bottom: 14px; }
+.rc-verdict.ok { color: var(--full); }
+.rc-verdict.bad { color: var(--critical); }
+.rc-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.rc-grid > div { display: flex; flex-direction: column; gap: 3px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+.rc-grid span { color: var(--text-mute); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+.rc-grid b { color: var(--text); font-size: 16px; }
+.rc-grid small { color: var(--text-dim); font-size: 12px; }
+.rc-note { color: var(--text-dim); font-size: 13px; margin: 12px 0 0; line-height: 1.5; }
+.rc-note.dim { color: var(--text-mute); font-size: 12px; }
+@media (max-width: 700px) { .rc-grid { grid-template-columns: repeat(2, 1fr); } }
+
 /* Toll controls: separators + selects */
 .toll-sep { display: inline-block; width: 1px; height: 22px; background: var(--border); margin: 0 3px; vertical-align: middle; }
 #toll-rep-type, #toll-rep-sel, #toll-rep-label { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 7px 8px; font-size: 13px; }

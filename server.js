@@ -244,6 +244,57 @@ async function roadDistance(lat1, lon1, lat2, lon2) {
   return { miles: haversineMiles(lat1, lon1, lat2, lon2), etaMin: null, source: "air" };
 }
 
+// --- Truck route check via OpenRouteService (car vs heavy-vehicle profile) ---
+const ORS_KEY = process.env.ORS_KEY || "";
+const ORS_ON = !!ORS_KEY;
+async function orsDirections(profile, coords) {
+  try {
+    const r = await fetch(`https://api.openrouteservice.org/v2/directions/${profile}`, {
+      method: "POST",
+      headers: { Authorization: ORS_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ coordinates: coords, radiuses: coords.map(() => 1500) }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!r.ok) return { ok: false, status: r.status };
+    const j = await r.json();
+    const rt = j.routes && j.routes[0];
+    if (!rt) return { ok: false };
+    return { ok: true, meters: rt.summary.distance, sec: rt.summary.duration, warnings: (rt.warnings || []).map((w) => w.message) };
+  } catch (e) { return { ok: false, error: String(e.message || e) }; }
+}
+async function orsGeocode(text) {
+  try {
+    const r = await fetch(`https://api.openrouteservice.org/geocode/search?api_key=${encodeURIComponent(ORS_KEY)}&text=${encodeURIComponent(text)}&boundary.country=US&size=1`, { signal: AbortSignal.timeout(12000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const f = j.features && j.features[0];
+    return f ? { coord: f.geometry.coordinates, label: f.properties.label } : null;
+  } catch { return null; }
+}
+async function resolveGoogleLink(url) {
+  let u = String(url || "").trim();
+  if (!u) return null;
+  if (/goo\.gl|maps\.app\.goo\.gl/.test(u)) {
+    try { const r = await fetch(u, { redirect: "follow", signal: AbortSignal.timeout(10000) }); u = r.url || u; } catch {}
+  }
+  const m = u.match(/\/maps\/dir\/([^@?]+)/);
+  if (!m) return null;
+  return m[1].split("/").map((s) => decodeURIComponent(s.replace(/\+/g, " ")).trim())
+    .filter((s) => s && !s.startsWith("data=") && !s.startsWith("@"));
+}
+// Turn a list of "lat,lng" or place-name strings into ORS [lon,lat] coords.
+async function pointsToCoords(items) {
+  const coords = [], labels = [];
+  for (const s of items) {
+    const m = String(s).match(/^\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)\s*$/);
+    if (m) { coords.push([+m[2], +m[1]]); labels.push(`${m[1]}, ${m[2]}`); continue; }
+    const g = await orsGeocode(s);
+    if (!g) return { error: `Topilmadi: "${s}"` };
+    coords.push(g.coord); labels.push(g.label || s);
+  }
+  return { coords, labels };
+}
+
 // --- Per-unit fuel-stop assignments (which Pilot station each truck is sent to) ---
 const ASSIGN_STORE = path.join(__dirname, "assignments.json");
 let assignments = {};
@@ -921,6 +972,57 @@ const server = http.createServer(async (req, res) => {
     fsBoardCache = { data: out, at: Date.now() };
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(out));
+    return;
+  }
+
+  // --- Truck route check: is a route truck-restricted? (car vs hgv profile) ---
+  if (req.url === "/api/route-check" && req.method === "POST") {
+    if (!ORS_ON) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "ORS_KEY sozlanmagan (Render Environment). Truck route check uchun OpenRouteService kaliti kerak." }));
+      return;
+    }
+    const body = await readBody(req);
+    let items = [];
+    if (body && body.link) {
+      const segs = await resolveGoogleLink(body.link);
+      if (!segs || segs.length < 2) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Google link'dan yo'nalish o'qib bo'lmadi. From/To ni qo'lda kiriting." }));
+        return;
+      }
+      items = segs;
+    } else if (body && body.from && body.to) {
+      const via = Array.isArray(body.via) ? body.via : (body.via ? [body.via] : []);
+      items = [body.from, ...via, body.to];
+    } else {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "link yoki from + to kerak" }));
+      return;
+    }
+    const pc = await pointsToCoords(items);
+    if (pc.error) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: pc.error })); return; }
+    const car = await orsDirections("driving-car", pc.coords);
+    const hgv = await orsDirections("driving-hgv", pc.coords);
+    if (!car.ok && !hgv.ok) { res.writeHead(502, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: "Routing xato (ORS). Kalitni yoki manzillarni tekshiring." })); return; }
+    const carMi = car.ok ? car.meters / 1609.34 : null;
+    const truckMi = hgv.ok ? hgv.meters / 1609.34 : null;
+    let restricted = null, extraMi = null;
+    const warnings = hgv.warnings || [];
+    if (carMi != null && truckMi != null) {
+      extraMi = truckMi - carMi;
+      restricted = (truckMi / carMi > 1.08 && extraMi > 2) || warnings.length > 0;
+    } else if (!hgv.ok && car.ok) {
+      restricted = true; // truck route not found where a car route exists -> restricted
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      ok: true, from: pc.labels[0], to: pc.labels[pc.labels.length - 1], stops: pc.labels,
+      carMiles: carMi != null ? +carMi.toFixed(1) : null,
+      truckMiles: truckMi != null ? +truckMi.toFixed(1) : null,
+      extraMiles: extraMi != null ? +extraMi.toFixed(1) : null,
+      restricted, warnings,
+    }));
     return;
   }
 

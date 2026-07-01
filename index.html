@@ -43,6 +43,7 @@
       <button class="tab" data-view="reports"><span class="tab-ic">📊</span>Reports</button>
       <button class="tab" data-view="ranking"><span class="tab-ic">🏆</span>Ranking</button>
       <button class="tab" data-view="toll"><span class="tab-ic">🛣️</span>Toll</button>
+      <button class="tab" data-view="routecheck"><span class="tab-ic">🚧</span>Route check</button>
       <button class="tab" data-view="coverage"><span class="tab-ic">📡</span>Sensor coverage</button>
     </nav>
     <div class="content-area">
@@ -433,6 +434,24 @@
       </div>
     </div>
 
+    <div id="view-routecheck" class="hidden">
+      <div class="cov-block">
+        <div class="cov-head"><h2>🚧 Truck route check</h2></div>
+        <p class="cov-note">Google Maps yo'nalish linkini tashlang, yoki From/To kiriting — yo'lda <b>truck cheklovi</b> (parkway, past ko'prik, truck-taqiq) bor-yo'qligini tekshiradi. Mashina yo'li va truck yo'lini solishtiradi.</p>
+        <div class="fs-form">
+          <input id="rc-link" placeholder="Google Maps link (maps.app.goo.gl/… yoki …/maps/dir/…)" style="min-width:360px" autocomplete="off">
+          <button class="btn primary" id="rc-go">Tekshir</button>
+        </div>
+        <p class="cov-note" style="margin:8px 0 4px">— yoki manzil bilan —</p>
+        <div class="fs-form">
+          <input id="rc-from" placeholder="From (masalan: Newark, NJ)" autocomplete="off">
+          <input id="rc-via" placeholder="Via (ixtiyoriy)" autocomplete="off">
+          <input id="rc-to" placeholder="To (masalan: Boston, MA)" autocomplete="off">
+        </div>
+        <div id="rc-result"></div>
+      </div>
+    </div>
+
     </div><!-- /content-area -->
   </main>
 
@@ -461,5 +480,6 @@
   <script src="app.js"></script>
   <script src="reports.js"></script>
   <script src="toll.js"></script>
+  <script src="route-check.js"></script>
 </body>
 </html>
