@@ -17,7 +17,6 @@ function loadEnv() {
 loadEnv();
 
 const API_KEY = process.env.MOTIVE_API_KEY;
-const HERE_API_KEY = process.env.HERE_API_KEY || "";
 const PORT = process.env.PORT || 3000;
 const MOTIVE_BASE = "https://api.gomotive.com";
 
@@ -243,39 +242,6 @@ async function roadDistance(lat1, lon1, lat2, lon2) {
     }
   } catch (e) { /* fall through */ }
   return { miles: haversineMiles(lat1, lon1, lat2, lon2), etaMin: null, source: "air" };
-}
-
-// --- HERE "flexible polyline" decoder (vendored — no dependency) ---
-// Spec: https://github.com/heremaps/flexible-polyline
-const FLEX_POLY_TABLE = [
-  62, -1, -1, -1, 63, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, -1, -1, -1, -1, -1, -1, -1,
-  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-  -1, -1, -1, -1, -1, -1,
-  26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51,
-];
-function decodeFlexPolyline(encoded) {
-  const values = [];
-  let shift = 0, result = 0;
-  for (let i = 0; i < encoded.length; i++) {
-    const c = FLEX_POLY_TABLE[encoded.charCodeAt(i) - 45];
-    result |= (c & 0x1f) << shift;
-    shift += 5;
-    if (c < 0x20) { values.push(result); shift = 0; result = 0; }
-  }
-  const toSigned = (v) => ((v & 1) ? ~(v >> 1) : (v >> 1));
-  const header = values[1] || 0;
-  const precision = header & 15;
-  const thirdDim = (header >> 4) & 7;
-  const factor = 10 ** precision;
-  let lat = 0, lon = 0, z = 0;
-  const pts = [];
-  for (let i = 2; i + 1 < values.length; ) {
-    lat += toSigned(values[i++]);
-    lon += toSigned(values[i++]);
-    if (thirdDim) z += toSigned(values[i++]);
-    pts.push([lat / factor, lon / factor]);
-  }
-  return pts;
 }
 
 // --- Per-unit fuel-stop assignments (which Pilot station each truck is sent to) ---
@@ -861,62 +827,6 @@ const server = http.createServer(async (req, res) => {
       for (const r of data.fleet) { r.assignedStop = assignments[r.unit] || null; r.note = unitNotes[r.unit] || ""; r.gallonLimit = unitLimits[r.unit] != null ? unitLimits[r.unit] : null; }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(data));
-    } catch (e) {
-      res.writeHead(502, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
-    }
-    return;
-  }
-
-  // Truck-safe route planning: HERE Routing v8 (transportMode=truck) automatically
-  // avoids US parkways/roads that ban commercial vehicles — no restriction list to maintain.
-  if (req.url === "/api/route" && req.method === "POST") {
-    const body = await readBody(req);
-    const pts = Array.isArray(body && body.points) ? body.points : [];
-    if (pts.length < 2) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "Kamida 2 nuqta kerak" }));
-      return;
-    }
-    if (!HERE_API_KEY) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "HERE_API_KEY sozlanmagan (.env)" }));
-      return;
-    }
-    try {
-      const origin = pts[0], dest = pts[pts.length - 1];
-      const via = pts.slice(1, -1).map((p) => `&via=${p.lat},${p.lon}`).join("");
-      const url = `https://router.hereapi.com/v8/routes?transportMode=truck` +
-        `&origin=${origin.lat},${origin.lon}&destination=${dest.lat},${dest.lon}${via}` +
-        `&return=polyline,summary,notices&truck[grossWeight]=34000&truck[shippingType]=general` +
-        `&apikey=${HERE_API_KEY}`;
-      const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
-      const j = await r.json();
-      if (!r.ok) {
-        res.writeHead(502, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: (j && j.title) || `HERE ${r.status}` }));
-        return;
-      }
-      const route = j.routes && j.routes[0];
-      if (!route) {
-        res.writeHead(502, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "HERE'dan marshrut topilmadi" }));
-        return;
-      }
-      let miles = 0, seconds = 0, polyline = [], notices = route.notices || [];
-      for (const sec of route.sections || []) {
-        if (sec.summary) { miles += sec.summary.length / 1609.34; seconds += sec.summary.duration; }
-        if (sec.polyline) polyline = polyline.concat(decodeFlexPolyline(sec.polyline));
-        if (sec.notices) notices = notices.concat(sec.notices);
-      }
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
-        ok: true,
-        miles: Math.round(miles * 10) / 10,
-        etaMin: Math.round(seconds / 60),
-        notices: notices.map((n) => n.title || n.code || String(n)),
-        polyline,
-      }));
     } catch (e) {
       res.writeHead(502, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
