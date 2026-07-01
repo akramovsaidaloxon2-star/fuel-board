@@ -607,6 +607,8 @@ footer {
 .rc-grid small { color: var(--text-dim); font-size: 12px; }
 .rc-note { color: var(--text-dim); font-size: 13px; margin: 12px 0 0; line-height: 1.5; }
 .rc-note.dim { color: var(--text-mute); font-size: 12px; }
+.rc-link { display: inline-block; margin: 14px 0 4px; background: var(--accent); color: #fff; font-weight: 600; font-size: 14px; padding: 10px 16px; border-radius: 8px; text-decoration: none; }
+.rc-link:hover { filter: brightness(1.08); }
 @media (max-width: 700px) { .rc-grid { grid-template-columns: repeat(2, 1fr); } }
 
 /* Toll controls: separators + selects */

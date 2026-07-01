@@ -39,6 +39,7 @@
           <div><span>Farq</span><b>${j.extraMiles != null ? (j.extraMiles > 0 ? "+" : "") + j.extraMiles + " mi" : "—"}</b><small>truck aylanishi</small></div>
         </div>
         <p class="rc-note">${explain}</p>
+        ${j.truckRouteUrl ? `<a class="rc-link" href="${j.truckRouteUrl}" target="_blank" rel="noopener">🗺️ Truck yo'lini Google Maps'da ochish (driverga yuborish)</a>` : ""}
         <p class="rc-note dim">⚠️ OSM ma'lumoti asosida — asosiy cheklovlarni tutadi, lekin 100% kafolat emas. Shubhali bo'lsa Truck Path bilan tasdiqlang.</p>
       </div>`;
   }

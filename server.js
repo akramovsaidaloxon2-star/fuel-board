@@ -247,9 +247,9 @@ async function roadDistance(lat1, lon1, lat2, lon2) {
 // --- Truck route check via OpenRouteService (car vs heavy-vehicle profile) ---
 const ORS_KEY = process.env.ORS_KEY || "";
 const ORS_ON = !!ORS_KEY;
-async function orsDirections(profile, coords) {
+async function orsDirections(profile, coords, wantGeom) {
   try {
-    const r = await fetch(`https://api.openrouteservice.org/v2/directions/${profile}`, {
+    const r = await fetch(`https://api.openrouteservice.org/v2/directions/${profile}${wantGeom ? "/geojson" : ""}`, {
       method: "POST",
       headers: { Authorization: ORS_KEY, "Content-Type": "application/json" },
       body: JSON.stringify({ coordinates: coords, radiuses: coords.map(() => 1500) }),
@@ -257,10 +257,23 @@ async function orsDirections(profile, coords) {
     });
     if (!r.ok) return { ok: false, status: r.status };
     const j = await r.json();
+    if (wantGeom) {
+      const f = j.features && j.features[0];
+      if (!f) return { ok: false };
+      return { ok: true, meters: f.properties.summary.distance, geom: f.geometry.coordinates, warnings: (f.properties.warnings || []).map((w) => w.message) };
+    }
     const rt = j.routes && j.routes[0];
     if (!rt) return { ok: false };
-    return { ok: true, meters: rt.summary.distance, sec: rt.summary.duration, warnings: (rt.warnings || []).map((w) => w.message) };
+    return { ok: true, meters: rt.summary.distance, warnings: (rt.warnings || []).map((w) => w.message) };
   } catch (e) { return { ok: false, error: String(e.message || e) }; }
+}
+// Build a Google Maps directions link from a route's geometry (sampled waypoints),
+// so opening it forces Google to follow the truck-safe path.
+function sampleGoogleUrl(geom, n = 10) {
+  if (!Array.isArray(geom) || geom.length < 2) return null;
+  const pts = [], step = (geom.length - 1) / (n - 1);
+  for (let i = 0; i < n; i++) { const c = geom[Math.round(i * step)]; pts.push(`${c[1].toFixed(5)},${c[0].toFixed(5)}`); }
+  return "https://www.google.com/maps/dir/" + pts.join("/");
 }
 async function orsGeocode(text) {
   try {
@@ -1003,7 +1016,7 @@ const server = http.createServer(async (req, res) => {
     const pc = await pointsToCoords(items);
     if (pc.error) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: pc.error })); return; }
     const car = await orsDirections("driving-car", pc.coords);
-    const hgv = await orsDirections("driving-hgv", pc.coords);
+    const hgv = await orsDirections("driving-hgv", pc.coords, true);   // want geometry for the truck route link
     if (!car.ok && !hgv.ok) { res.writeHead(502, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: "Routing xato (ORS). Kalitni yoki manzillarni tekshiring." })); return; }
     const carMi = car.ok ? car.meters / 1609.34 : null;
     const truckMi = hgv.ok ? hgv.meters / 1609.34 : null;
@@ -1022,6 +1035,7 @@ const server = http.createServer(async (req, res) => {
       truckMiles: truckMi != null ? +truckMi.toFixed(1) : null,
       extraMiles: extraMi != null ? +extraMi.toFixed(1) : null,
       restricted, warnings,
+      truckRouteUrl: hgv.ok ? sampleGoogleUrl(hgv.geom) : null,
     }));
     return;
   }
