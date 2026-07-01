@@ -13,3 +13,5 @@ services:
         sync: false
       - key: AUTH_PASS
         sync: false
+      - key: ORS_KEY
+        sync: false
