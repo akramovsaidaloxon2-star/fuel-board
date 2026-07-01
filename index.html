@@ -43,6 +43,7 @@
       <button class="tab" data-view="reports"><span class="tab-ic">📊</span>Reports</button>
       <button class="tab" data-view="ranking"><span class="tab-ic">🏆</span>Ranking</button>
       <button class="tab" data-view="toll"><span class="tab-ic">🛣️</span>Toll</button>
+      <button class="tab" data-view="route"><span class="tab-ic">🧭</span>Route</button>
       <button class="tab" data-view="coverage"><span class="tab-ic">📡</span>Sensor coverage</button>
     </nav>
     <div class="content-area">
@@ -346,6 +347,30 @@
       </div>
     </div>
 
+    <div id="view-route" class="hidden">
+      <div class="rep-controls">
+        <input id="route-search" placeholder="Manzil qidirish (start, via yoki destination)..." style="width:280px">
+        <span class="toll-sep"></span>
+        <button class="btn primary" id="route-compute">🧭 Yo'nalishni hisoblash</button>
+        <button class="btn" id="route-clear">🗑️ Tozalash</button>
+        <span class="toll-sep"></span>
+        <button class="btn" id="route-copy-link" disabled>🔗 Google Maps link nusxalash</button>
+      </div>
+
+      <div class="route-layout">
+        <aside class="board route-sidebar">
+          <h3>Nuqtalar</h3>
+          <p class="cov-note">Manzil qidiring yoki xaritani bosing — nuqtalar tartib bilan qo'shiladi (birinchisi start, oxirgisi destination).</p>
+          <ol id="route-points"></ol>
+          <div id="route-summary" class="empty">Hali nuqta yo'q</div>
+          <div id="route-notices"></div>
+        </aside>
+        <div class="board route-map-wrap">
+          <div id="route-map"></div>
+        </div>
+      </div>
+    </div>
+
     <div id="view-coverage" class="hidden">
       <section class="stats coverage-stats">
         <div class="stat-card full">
@@ -461,5 +486,8 @@
   <script src="app.js"></script>
   <script src="reports.js"></script>
   <script src="toll.js"></script>
+  <!-- Route tab: paste your own Google Maps JS API key below (Maps JavaScript API + Places API enabled, key restricted by HTTP referrer). -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_MAPS_KEY&libraries=places&callback=Function.prototype"></script>
+  <script src="route.js"></script>
 </body>
 </html>

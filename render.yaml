@@ -9,6 +9,8 @@ services:
     envVars:
       - key: MOTIVE_API_KEY
         sync: false
+      - key: HERE_API_KEY
+        sync: false
       - key: AUTH_USER
         sync: false
       - key: AUTH_PASS
