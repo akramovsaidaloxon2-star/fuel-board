@@ -284,16 +284,35 @@ async function orsGeocode(text) {
     return f ? { coord: f.geometry.coordinates, label: f.properties.label } : null;
   } catch { return null; }
 }
+async function orsReverse(lon, lat) {
+  try {
+    const r = await fetch(`https://api.openrouteservice.org/geocode/reverse?api_key=${encodeURIComponent(ORS_KEY)}&point.lon=${lon}&point.lat=${lat}&size=1`, { signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const f = j.features && j.features[0];
+    return f ? f.properties.label : null;
+  } catch { return null; }
+}
 async function resolveGoogleLink(url) {
   let u = String(url || "").trim();
   if (!u) return null;
   if (/goo\.gl|maps\.app\.goo\.gl/.test(u)) {
     try { const r = await fetch(u, { redirect: "follow", signal: AbortSignal.timeout(10000) }); u = r.url || u; } catch {}
   }
+  // 1) Exact waypoint coords from Google's data= param (!1d<lon>!2d<lat> per stop) — most accurate, no geocoding guess.
+  const coords = [];
+  for (const m of u.matchAll(/!1d(-?\d+\.\d+)!2d(-?\d+\.\d+)/g)) {
+    let lon = parseFloat(m[1]), lat = parseFloat(m[2]);
+    if (Math.abs(lat) > 90 && Math.abs(lon) <= 90) { const t = lon; lon = lat; lat = t; }
+    if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) coords.push([lon, lat]);
+  }
+  if (coords.length >= 2) return { coords };
+  // 2) Fallback: place-name segments from /dir/ (geocoded).
   const m = u.match(/\/maps\/dir\/([^@?]+)/);
   if (!m) return null;
-  return m[1].split("/").map((s) => decodeURIComponent(s.replace(/\+/g, " ")).trim())
+  const names = m[1].split("/").map((s) => decodeURIComponent(s.replace(/\+/g, " ")).trim())
     .filter((s) => s && !s.startsWith("data=") && !s.startsWith("@"));
+  return names.length >= 2 ? { names } : null;
 }
 // Turn a list of "lat,lng" or place-name strings into ORS [lon,lat] coords.
 async function pointsToCoords(items) {
@@ -996,24 +1015,30 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const body = await readBody(req);
-    let items = [];
+    let pc;
     if (body && body.link) {
-      const segs = await resolveGoogleLink(body.link);
-      if (!segs || segs.length < 2) {
+      const parsed = await resolveGoogleLink(body.link);
+      if (parsed && parsed.coords) {
+        // Use Google's exact pinned coordinates — no geocoding guess.
+        const c = parsed.coords;
+        const a = await orsReverse(c[0][0], c[0][1]);
+        const b = await orsReverse(c[c.length - 1][0], c[c.length - 1][1]);
+        pc = { coords: c, labels: c.map((_, i) => i === 0 ? (a || "Boshlanish") : (i === c.length - 1 ? (b || "Manzil") : "To'xtash")) };
+      } else if (parsed && parsed.names) {
+        pc = await pointsToCoords(parsed.names);
+      } else {
         res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Google link'dan yo'nalish o'qib bo'lmadi. From/To ni qo'lda kiriting." }));
+        res.end(JSON.stringify({ ok: false, error: "Google link'dan yo'nalish o'qib bo'lmadi. To'liq 'Directions' linkini (from→to) tashlang yoki From/To ni qo'lda kiriting." }));
         return;
       }
-      items = segs;
     } else if (body && body.from && body.to) {
       const via = Array.isArray(body.via) ? body.via : (body.via ? [body.via] : []);
-      items = [body.from, ...via, body.to];
+      pc = await pointsToCoords([body.from, ...via, body.to]);
     } else {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "link yoki from + to kerak" }));
       return;
     }
-    const pc = await pointsToCoords(items);
     if (pc.error) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: pc.error })); return; }
     const car = await orsDirections("driving-car", pc.coords);
     const hgv = await orsDirections("driving-hgv", pc.coords, true);   // want geometry for the truck route link
