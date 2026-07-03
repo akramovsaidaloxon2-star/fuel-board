@@ -11,9 +11,7 @@
   function blank() { return { driver: "", unit: "", loadId: "", date: "", route: "", tollCalc: null, givenDir: null, status: "", dh: null, dispatched: null, directed: null, driven: null, totalDriven: null, drivenToll: null, charge: null, note: "" }; }
   const money = (n) => (n == null || isNaN(n)) ? "" : "$" + Number(n).toFixed(2);
   const num = (n) => (n == null || isNaN(n)) ? "" : Number(n).toFixed(1);
-  const esc = (v) => String(v == null ? "" : v)
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  const esc = (v) => String(v == null ? "" : v).replace(/"/g, "&quot;");
 
   // Estimated difference per row. Like the report, a load only earns soft saving when it was
   // FOLLOWED — NOT FOLLOWED / SKIPPED loads count as $0. Returns null when not computable yet.
