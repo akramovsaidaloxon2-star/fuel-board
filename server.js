@@ -157,12 +157,12 @@ let fuelHist = {}; // { [unit]: { fuel: number, at: ISOstring } }
 try {
   fuelHist = JSON.parse(fs.readFileSync(FUEL_STORE, "utf8"));
 } catch { fuelHist = {}; }
-// On a fresh/ephemeral host (e.g. Render free tier wipes the disk on every
-// restart) start from the committed seed so coverage isn't stuck at "live only".
-if (!Object.keys(fuelHist).length) {
-  try { fuelHist = JSON.parse(fs.readFileSync(path.join(__dirname, "fuel_seed.json"), "utf8")); }
-  catch { fuelHist = {}; }
-}
+// NOTE: the static demo seed (fuel_seed.json, frozen at commit time) is applied
+// later, in initDurable(), and only for units that still have no reading at all
+// after the durable per-unit fuel_series.json has had a chance to backfill the
+// real last-known value. Applying it wholesale here (as before) let a months-old
+// demo reading permanently mask a fresher real one on every restart, since later
+// code only fills in a unit's fuelHist entry when one isn't already present.
 
 let saveTimer = null;
 function saveFuelHist() {
@@ -1283,40 +1283,49 @@ const server = http.createServer(async (req, res) => {
 // Load durable data from the private GitHub repo on startup (overrides the
 // ephemeral local disk copy), so reports + fuel history survive any restart.
 async function initDurable() {
-  if (!GH_ON) return;
-  const r = await ghLoad("reports_data.json");
-  if (Array.isArray(r)) reports = r;
-  const s = await ghLoad("fuel_series.json");
-  if (s && typeof s === "object") {
-    fuelSeries = s;
-    // Seed the last-known fuel cache from the durable series, so parked trucks
-    // still show their most recent reading after a restart/deploy (not "No data yet").
-    let seeded = 0;
-    for (const u in fuelSeries) {
-      const arr = fuelSeries[u];
-      if (Array.isArray(arr) && arr.length && !fuelHist[u]) {
-        const last = arr[arr.length - 1];
-        if (last && typeof last[1] === "number") { fuelHist[u] = { fuel: last[1], at: new Date(last[0]).toISOString() }; seeded++; }
+  let seeded = 0;
+  if (GH_ON) {
+    const r = await ghLoad("reports_data.json");
+    if (Array.isArray(r)) reports = r;
+    const s = await ghLoad("fuel_series.json");
+    if (s && typeof s === "object") {
+      fuelSeries = s;
+      // Seed the last-known fuel cache from the durable series, so parked trucks
+      // still show their most recent reading after a restart/deploy (not "No data yet").
+      for (const u in fuelSeries) {
+        const arr = fuelSeries[u];
+        if (Array.isArray(arr) && arr.length && !fuelHist[u]) {
+          const last = arr[arr.length - 1];
+          if (last && typeof last[1] === "number") { fuelHist[u] = { fuel: last[1], at: new Date(last[0]).toISOString() }; seeded++; }
+        }
       }
     }
-    if (seeded) { saveFuelHist(); cache.at = 0; } // invalidate fuel cache so the seed shows
-    console.log(`  Last-known seeded:   ${seeded} units from durable series`);
+    const o = await ghLoad("odo_daily.json");
+    if (o && typeof o === "object") odoDaily = o;
+    const tl = await ghLoad("toll_data.json");
+    if (Array.isArray(tl)) tollRows = tl;
+    const as = await ghLoad("assignments.json");
+    if (as && typeof as === "object" && !Array.isArray(as)) { assignments = as; migrateAssignments(); }
+    const pr = await ghLoad("prices.json");
+    if (pr && pr.prices) priceData = pr;
+    const tr = await ghLoad("toll_reports_data.json");
+    if (Array.isArray(tr)) tollReports = tr;
+    const un = await ghLoad("unit_notes.json");
+    if (un && typeof un === "object" && !Array.isArray(un)) unitNotes = un;
+    const ul = await ghLoad("unit_limits.json");
+    if (ul && typeof ul === "object" && !Array.isArray(ul)) unitLimits = ul;
+    console.log(`  Durable store:       GitHub ${GH_REPO} ✓ (reports: ${reports.length})`);
   }
-  const o = await ghLoad("odo_daily.json");
-  if (o && typeof o === "object") odoDaily = o;
-  const tl = await ghLoad("toll_data.json");
-  if (Array.isArray(tl)) tollRows = tl;
-  const as = await ghLoad("assignments.json");
-  if (as && typeof as === "object" && !Array.isArray(as)) { assignments = as; migrateAssignments(); }
-  const pr = await ghLoad("prices.json");
-  if (pr && pr.prices) priceData = pr;
-  const tr = await ghLoad("toll_reports_data.json");
-  if (Array.isArray(tr)) tollReports = tr;
-  const un = await ghLoad("unit_notes.json");
-  if (un && typeof un === "object" && !Array.isArray(un)) unitNotes = un;
-  const ul = await ghLoad("unit_limits.json");
-  if (ul && typeof ul === "object" && !Array.isArray(ul)) unitLimits = ul;
-  console.log(`  Durable store:       GitHub ${GH_REPO} ✓ (reports: ${reports.length})`);
+  // Any unit that still has no reading at all at this point (brand new / never
+  // tracked, or GH off) falls back to the static demo seed rather than showing
+  // "No data yet" -- but only fills gaps, so it can never mask a fresher real
+  // reading pulled from the durable series above.
+  try {
+    const seed = JSON.parse(fs.readFileSync(path.join(__dirname, "fuel_seed.json"), "utf8"));
+    for (const u in seed) { if (!fuelHist[u]) { fuelHist[u] = seed[u]; seeded++; } }
+  } catch {}
+  if (seeded) { saveFuelHist(); cache.at = 0; } // invalidate fuel cache so the seeded values show
+  if (seeded) console.log(`  Last-known seeded:   ${seeded} units (durable series + demo seed gaps)`);
 }
 
 server.listen(PORT, () => {
