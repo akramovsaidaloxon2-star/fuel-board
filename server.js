@@ -125,6 +125,25 @@ function ghSave(file, obj) {
     ghPut(file, data).catch((e) => console.error("ghSave err", file, e.message));
   }, wait);
 }
+// Flush any GH writes still waiting out their throttle window before the
+// process exits (e.g. a Render redeploy), so a restart mid-window doesn't
+// silently drop up to GH_MIN worth of fuel/odometer history.
+async function flushPendingGhSaves() {
+  if (!GH_ON) return;
+  const files = Object.keys(ghPending);
+  for (const file of files) {
+    if (ghTimers[file]) { clearTimeout(ghTimers[file]); ghTimers[file] = null; }
+    const data = ghPending[file]; delete ghPending[file];
+    try { await ghPut(file, data); } catch (e) { console.error("ghSave flush err", file, e.message); }
+  }
+}
+async function gracefulShutdown(signal) {
+  console.log(`\n  ${signal} received — flushing pending saves...`);
+  try { await flushPendingGhSaves(); } catch {}
+  process.exit(0);
+}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
 // --- Simple in-memory cache so we don't hammer the Motive API ---
 let cache = { data: null, at: 0 };
