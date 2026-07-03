@@ -125,6 +125,25 @@ function ghSave(file, obj) {
     ghPut(file, data).catch((e) => console.error("ghSave err", file, e.message));
   }, wait);
 }
+// Flush any GH writes still waiting out their throttle window before the
+// process exits (e.g. a Render redeploy), so a restart mid-window doesn't
+// silently drop up to GH_MIN worth of fuel/odometer history.
+async function flushPendingGhSaves() {
+  if (!GH_ON) return;
+  const files = Object.keys(ghPending);
+  for (const file of files) {
+    if (ghTimers[file]) { clearTimeout(ghTimers[file]); ghTimers[file] = null; }
+    const data = ghPending[file]; delete ghPending[file];
+    try { await ghPut(file, data); } catch (e) { console.error("ghSave flush err", file, e.message); }
+  }
+}
+async function gracefulShutdown(signal) {
+  console.log(`\n  ${signal} received — flushing pending saves...`);
+  try { await flushPendingGhSaves(); } catch {}
+  process.exit(0);
+}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
 // --- Simple in-memory cache so we don't hammer the Motive API ---
 let cache = { data: null, at: 0 };
@@ -208,6 +227,14 @@ function getOdoMiles(unit, start, end) {
   const dates = Object.keys(days).sort();
   const endDate = dates.filter((d) => d <= end).pop();
   let startDate = dates.filter((d) => d < start).pop();
+  // A data gap (e.g. a redeploy wiped odo_daily.json before it synced) can leave the
+  // closest prior snapshot many days/weeks before `start`. Using it as the baseline
+  // would silently inflate the period's mileage, so require it to be reasonably close;
+  // otherwise fall back to the first snapshot actually inside the period.
+  const MAX_GAP_DAYS = 2;
+  if (startDate && (new Date(start) - new Date(startDate)) / 864e5 > MAX_GAP_DAYS) {
+    startDate = dates.filter((d) => d >= start && d <= end)[0] || null;
+  }
   if (!startDate) startDate = dates.filter((d) => d >= start && d <= end)[0]; // fallback: first day in range
   if (!endDate || !startDate || endDate <= startDate) return null;
   const m = days[endDate] - days[startDate];
@@ -478,6 +505,21 @@ function ageMinFrom(iso) {
   return Math.round((Date.now() - new Date(iso).getTime()) / 60000);
 }
 
+// Real per-unit MPG only exists from fuel-purchase reports (miles driven / gallons
+// bought). Live telematics has no cumulative-gallons-consumed field, so pull the
+// most recent report row for this unit instead of trying to derive it from `loc`.
+function unitMpgFromReports(unit) {
+  let best = null;
+  for (const r of reports) {
+    if (!Array.isArray(r.rows)) continue;
+    const row = r.rows.find((x) => x.unit === unit && x.mpg != null);
+    if (row && (!best || (r.createdAt || "") > best.createdAt)) {
+      best = { mpg: row.mpg, createdAt: r.createdAt || "" };
+    }
+  }
+  return best ? best.mpg : null;
+}
+
 function mapFleet(raw) {
   const now = Date.now();
   let dirty = false;
@@ -525,8 +567,7 @@ function mapFleet(raw) {
       fuelAgeMin: ageMinFrom(fuelAt),
       speed: loc.speed ?? null,
       odometer: loc.odometer != null ? Math.round(loc.odometer) : null,
-      mpg: (loc.odometer != null && loc.fuel != null && loc.fuel > 0)
-        ? Math.round((loc.odometer / loc.fuel) * 10) / 10 : null,
+      mpg: unitMpgFromReports(unit),
       ecm: (loc.odometer != null || loc.engine_hours != null),
       hasLocation: !!loc.located_at,
       status: statusFromSpeed(loc.speed, ageMin),
@@ -661,7 +702,15 @@ function saveToll() {
   ghSave("toll_data.json", tollRows);
 }
 // Public read-only CSV of the toll board (token-gated) for a Google Sheets =IMPORTDATA share.
-const TOLL_CSV_KEY = process.env.TOLL_CSV_KEY || crypto.createHmac("sha256", SESSION_SECRET).update("toll-csv-v1").digest("hex").slice(0, 20);
+// Must NOT be derived from the login passwords (those default to weak/example values in
+// .env.example) -- if no explicit key is configured, generate a random one and tell the
+// operator to pin it via env so the share link stays stable across restarts.
+const TOLL_CSV_KEY = process.env.TOLL_CSV_KEY || (() => {
+  const k = crypto.randomBytes(16).toString("hex");
+  console.warn(`  ⚠ TOLL_CSV_KEY not set -- generated a random key for this run.`);
+  console.warn(`    Set TOLL_CSV_KEY=${k} in the environment to keep the /api/toll.csv link stable across restarts.`);
+  return k;
+})();
 function csvCell(v) {
   if (v == null) return "";
   const s = String(v);
@@ -729,8 +778,9 @@ async function checkTransactions(periodStart, periodEnd, transactions) {
   const idMap = await getVehicleIdMap();
   const byUnit = {};
   transactions.forEach((t) => { (byUnit[t.unit] = byUnit[t.unit] || []).push(t); });
-  const startISO = (periodStart || "2026-01-01") + "T00:00:00Z";
-  const endISO = (periodEnd || periodStart || "2026-12-31") + "T23:59:59Z";
+  const curYear = new Date().getUTCFullYear();
+  const startISO = (periodStart || `${curYear}-01-01`) + "T00:00:00Z";
+  const endISO = (periodEnd || periodStart || `${curYear}-12-31`) + "T23:59:59Z";
   const W = 4 * 3600 * 1000;
   const out = [];
   for (const unit of Object.keys(byUnit)) {
@@ -768,12 +818,17 @@ async function checkTransactions(periodStart, periodEnd, transactions) {
       let fuelVerdict = "no-fuel-data", rise = null;
       if (before.length && after.length) {
         rise = +(Math.max(...after) - Math.min(...before)).toFixed(1);
-        fuelVerdict = rise > 10 ? "rose" : "no-rise";
+        // Readings are de-duped (see recordFuelPoint), so a slow fill can be under-
+        // sampled. Only call "no-rise" when there's enough density on both sides to
+        // trust it -- otherwise this is inconclusive, not proof of fraud.
+        const sparse = before.length < 2 || after.length < 2;
+        fuelVerdict = rise > 10 ? "rose" : (sparse ? "low-data" : "no-rise");
       }
       // Combined: fuel-level evidence wins when we have it.
       let combined = verdict;
       if (fuelVerdict === "rose") combined = "all-good";
       else if (fuelVerdict === "no-rise") combined = "fraud";
+      else if (fuelVerdict === "low-data") combined = "check-manually";
 
       out.push({ unit, date: t.date, time: t.time, fuelCity: t.city, fuelState: t.state, qty: t.qty,
         truckStates: [...states], truckCities: [...new Set(cities)].slice(0, 3),

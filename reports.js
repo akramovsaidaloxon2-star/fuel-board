@@ -189,7 +189,7 @@
       <p class="cov-note">Bir xil truck bo'lsa (masalan <b>0007 = 007</b>): jadvalni tahrirlab, o'sha unit qatoriga Motive miles'ini qo'lda kiriting — MPG avtomatik hisoblanadi.</p>`;
   }
 
-  const esc = (v) => String(v == null ? "" : v).replace(/"/g, "&quot;");
+  const esc = (v) => String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   function recalcRow(r) {
     r.ppg = (r.amt != null && r.qty) ? +(r.amt / r.qty).toFixed(3) : null;
     r.mpg = (r.miles != null && r.qty) ? +(r.miles / r.qty).toFixed(2) : null;
@@ -298,6 +298,7 @@
       const v = r.combined || r.verdict;
       if (v === "all-good") return '<span style="color:var(--full);font-weight:600">✅ ALL GOOD</span>';
       if (v === "fraud") return '<span style="color:var(--critical);font-weight:600">🚨 FRAUD</span>';
+      if (v === "check-manually") return '<span style="color:var(--warn,#e0a800);font-weight:600">🔎 qo\'lda tekshiring (ma\'lumot kam)</span>';
       if (v === "ok") return '<span style="color:var(--full)">✓ joy mos</span>';
       if (v === "mismatch") return '<span style="color:var(--critical);font-weight:600">⚠️ joy mos emas</span>';
       if (v === "no-data") return '<span style="color:var(--text-mute)">period yo\'q</span>';
