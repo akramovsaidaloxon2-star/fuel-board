@@ -64,7 +64,15 @@ function render() {
   const order = $("#sort-order").value;
   const showNoFuel = $("#show-nofuel") ? $("#show-nofuel").checked : true;
 
+  // Miles to the nearest toll point of a unit (null = no point / no distance yet).
+  const nearestToll = (unit) => {
+    const mi = (tpBoard[unit] || []).map(p => p.miles).filter(m => m != null);
+    return mi.length ? Math.min(...mi) : null;
+  };
+
   let rows = fleet.filter(r => {
+    // "Toll nuqtalari" keeps just the units being watched, on their own.
+    if (order === "toll" && !(tpBoard[r.unit] || []).length) return false;
     if (!showNoFuel && r.fuel == null) return false;
     if (lvl && fuelClass(r.fuel) !== lvl) return false;
     if (st && r.status !== st) return false;
@@ -82,6 +90,16 @@ function render() {
   if (order === "asc") rows.sort((a, b) => nullLast(a, b, (x, y) => x.fuel - y.fuel));
   else if (order === "desc") rows.sort((a, b) => nullLast(a, b, (x, y) => y.fuel - x.fuel));
   else if (order === "updated") rows.sort((a, b) => a.updated - b.updated);
+  else if (order === "toll") {
+    // Closest to its toll point first — that is the one to call about now.
+    rows.sort((a, b) => {
+      const x = nearestToll(a.unit), y = nearestToll(b.unit);
+      if (x == null && y == null) return a.unit.localeCompare(b.unit);
+      if (x == null) return 1;
+      if (y == null) return -1;
+      return x - y;
+    });
+  }
 
   renderStats(rows);
 
@@ -89,6 +107,7 @@ function render() {
   const empty = $("#empty");
   if (!rows.length) {
     tbody.innerHTML = "";
+    empty.textContent = order === "toll" ? "Hech bir unitga toll nuqtasi qo'yilmagan" : "No units match your filters";
     empty.classList.remove("hidden");
     return;
   }
