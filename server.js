@@ -1100,10 +1100,14 @@ async function runTollWatch() {
       const d = await roadDistance(truck.lat, truck.lon, p.lat, p.lon);
       const miles = Math.round(d.miles * 10) / 10;
       if (miles <= TOLL_REMIND_MI && !p.remindedAt) {
-        p.remindedAt = new Date().toISOString();
-        changed = true;
         const driver = truck.driver && truck.driver !== "Unassigned" ? ` (${truck.driver})` : "";
-        await tgSend(`📍 Toll eslatma\nUnit ${unit}${driver} → ${p.label}\nQolgan masofa: ${miles} mi${d.etaMin ? ` · ~${d.etaMin} daq` : ""}\n\nDriverga yo'nalishni eslating.`);
+        const text = `📍 Toll eslatma\nUnit ${unit}${driver} → ${p.label}\nQolgan masofa: ${miles} mi${d.etaMin ? ` · ~${d.etaMin} daq` : ""}\n\nDriverga yo'nalishni eslating.`;
+        // Mark it done only once Telegram has actually accepted the message —
+        // otherwise a failed send would bury the reminder for good, since the
+        // point never fires twice on one approach. A failure just retries next
+        // tick. With Telegram off the board is the only channel, so mark it.
+        const delivered = TG_ON ? await tgSend(text) : true;
+        if (delivered) { p.remindedAt = new Date().toISOString(); changed = true; }
       } else if (miles > TOLL_REMIND_MI + 10 && p.remindedAt) {
         delete p.remindedAt;
         changed = true;
