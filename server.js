@@ -272,18 +272,66 @@ const FSBOARD_MS = 50 * 1000; // ~50s so the 60s board poll always recomputes mi
 // The board warns dispatch while the truck is still TOLL_REMIND_MI out, so the
 // driver can be reminded about the directed route before he reaches the toll.
 const TOLLPT_STORE = path.join(__dirname, "toll_points.json");
-let tollPoints = {}; // { unit: { label, lat, lon, url, at } }
+let tollPoints = {}; // { unit: [ { id, label, lat, lon, url, at } ] }
+const MAX_POINTS = 8; // per unit — a directed route rarely needs more
+const newPointId = () => "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+// The first version of this feature stored a single point per unit. Fold those
+// into the list shape and drop anything without usable coordinates.
+function migrateTollPoints() {
+  for (const u in tollPoints) {
+    const v = tollPoints[u];
+    const list = Array.isArray(v) ? v : [v];
+    const clean = list
+      .filter((p) => p && Number.isFinite(+p.lat) && Number.isFinite(+p.lon))
+      .map((p) => ({ ...p, id: p.id || newPointId(), lat: +p.lat, lon: +p.lon }))
+      .slice(0, MAX_POINTS);
+    if (clean.length) tollPoints[u] = clean; else delete tollPoints[u];
+  }
+}
 try { tollPoints = JSON.parse(fs.readFileSync(TOLLPT_STORE, "utf8")); } catch { tollPoints = {}; }
+migrateTollPoints();
 function saveTollPoints() {
   fs.writeFile(TOLLPT_STORE, JSON.stringify(tollPoints), () => {});
   ghSave("toll_points.json", tollPoints);
 }
 let tpBoardCache = { data: null, at: 0 };
 const TOLL_REMIND_MI = 20; // how far out the reminder fires (road miles)
+const ROUTE_NEAR_MI = 60;  // beyond this, straight-line miles are good enough
 
-// Pull one coordinate out of whatever Google Maps hands over: a share link, a
-// full desktop URL, a directions link, or coordinates typed by hand. No API key
-// and no geocoder involved — every pattern below is already in the URL itself.
+// Place name -> coordinates via OpenStreetMap's Nominatim (free, no API key).
+// Cached per phrase: dispatch types the same handful of exits all week, and
+// Nominatim's usage policy asks callers not to repeat identical lookups.
+const GEOCODE_URL = process.env.GEOCODE_URL || "https://nominatim.openstreetmap.org/search";
+const geoCache = new Map();
+async function geocodePlace(text) {
+  const q = String(text || "").trim();
+  if (q.length < 3) return null;
+  const key = q.toLowerCase();
+  if (geoCache.has(key)) return geoCache.get(key);
+  try {
+    const url = `${GEOCODE_URL}?format=jsonv2&limit=1&countrycodes=us&q=${encodeURIComponent(q)}`;
+    const r = await fetch(url, {
+      headers: { "User-Agent": "movex-fuel-board/1.0 (fleet dispatch board)", Accept: "application/json" },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const hit = Array.isArray(j) ? j[0] : null;
+    if (!hit || hit.lat == null || hit.lon == null) { geoCache.set(key, null); return null; }
+    const lat = +hit.lat, lon = +hit.lon;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    // Nominatim's display_name is a long postal address; the first two parts
+    // ("Breezewood, Bedford County") read better in a table cell.
+    const label = String(hit.display_name || q).split(",").slice(0, 2).join(",").trim() || q;
+    const out = { lat, lon, label: label.slice(0, 60) };
+    geoCache.set(key, out);
+    return out;
+  } catch { return null; }
+}
+
+// Turn whatever dispatch typed into one coordinate: a place name, a Google Maps
+// share link, a full desktop URL, a directions link, or bare coordinates. Only
+// the place-name path needs the geocoder — links carry the coords themselves.
 async function resolveMapPoint(input) {
   let u = String(input || "").trim();
   if (!u) return null;
@@ -294,7 +342,8 @@ async function resolveMapPoint(input) {
     if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) return { lat, lon, label: `${lat}, ${lon}` };
     return null;
   }
-  if (!/^https?:\/\//i.test(u)) return null;
+  // Not a URL -> treat it as a place name ("Breezewood, PA", "I-80 Exit 161").
+  if (!/^https?:\/\//i.test(u)) return geocodePlace(u);
   // Short share links (maps.app.goo.gl/…) only carry the coords after redirect.
   if (/goo\.gl/.test(u)) {
     try { const r = await fetch(u, { redirect: "follow", signal: AbortSignal.timeout(10000) }); u = r.url || u; } catch {}
@@ -840,28 +889,47 @@ const server = http.createServer(async (req, res) => {
     const link = (body && (body.link || body.point) || "").trim();
     if (!unit || !link) {
       res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "unit va Google Maps link kerak" }));
+      res.end(JSON.stringify({ ok: false, error: "unit va joy (nomi, linki yoki koordinatasi) kerak" }));
       return;
     }
     const pt = await resolveMapPoint(link);
     if (!pt) {
       res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "Linkdan joy o'qib bo'lmadi. Google Maps'da joyni bosib 'Share → Copy link' qiling, yoki 41.2033,-77.1945 ko'rinishida koordinata yozing." }));
+      res.end(JSON.stringify({ ok: false, error: "Joy topilmadi. Shahar yoki manzil yozing (masalan: Breezewood, PA), yoki Google Maps linkini tashlang, yoki 41.2033,-77.1945 ko'rinishida koordinata bering." }));
       return;
     }
-    tollPoints[unit] = { label: (body.label || "").trim() || pt.label, lat: pt.lat, lon: pt.lon, url: link, at: new Date().toISOString() };
+    const list = tollPoints[unit] || (tollPoints[unit] = []);
+    if (list.length >= MAX_POINTS) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: `Unit ${unit} da allaqachon ${MAX_POINTS} ta nuqta bor — avval bittasini o'chiring.` }));
+      return;
+    }
+    const point = { id: newPointId(), label: (body.label || "").trim() || pt.label, lat: pt.lat, lon: pt.lon, url: link, at: new Date().toISOString() };
+    list.push(point);
     saveTollPoints();
     tpBoardCache = { data: null, at: 0 };
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, unit, point: tollPoints[unit] }));
+    res.end(JSON.stringify({ ok: true, unit, point, count: list.length }));
     return;
   }
+  // Drop one point by id, or every point on the unit when no id is given.
   if (req.url === "/api/toll-point/clear" && req.method === "POST") {
     const body = await readBody(req);
     const unit = (body && body.unit || "").trim();
-    if (tollPoints[unit]) { delete tollPoints[unit]; saveTollPoints(); tpBoardCache = { data: null, at: 0 }; }
+    const id = (body && body.id || "").trim();
+    const list = tollPoints[unit];
+    if (list) {
+      if (id) {
+        tollPoints[unit] = list.filter((p) => p.id !== id);
+        if (!tollPoints[unit].length) delete tollPoints[unit];
+      } else {
+        delete tollPoints[unit];
+      }
+      saveTollPoints();
+      tpBoardCache = { data: null, at: 0 };
+    }
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true }));
+    res.end(JSON.stringify({ ok: true, left: (tollPoints[unit] || []).length }));
     return;
   }
   // Road miles from each truck to its toll point (same ~50s cache as the stop board).
@@ -875,15 +943,28 @@ const server = http.createServer(async (req, res) => {
     try { data = await getFuelData(); } catch (e) { data = { fleet: [] }; }
     const points = {};
     for (const unit of Object.keys(tollPoints)) {
-      const p = tollPoints[unit];
-      const base = { label: p.label, lat: p.lat, lon: p.lon, url: p.url };
       const truck = data.fleet.find((x) => x.unit === unit);
-      if (!truck || truck.lat == null || truck.lon == null) {
-        points[unit] = { ...base, miles: null, error: "no-location" };
-        continue;
+      const out = [];
+      for (const p of tollPoints[unit]) {
+        const base = { id: p.id, label: p.label, lat: p.lat, lon: p.lon, url: p.url };
+        if (!truck || truck.lat == null || truck.lon == null) {
+          out.push({ ...base, miles: null, error: "no-location" });
+          continue;
+        }
+        // Straight-line first: with several points per unit, routing every one
+        // of them each poll would hammer OSRM. Only the last stretch needs road
+        // accuracy — anything further out is fine as a rough "still far" number.
+        const air = haversineMiles(truck.lat, truck.lon, p.lat, p.lon);
+        if (air > ROUTE_NEAR_MI) {
+          out.push({ ...base, miles: Math.round(air), etaMin: null, source: "air" });
+          continue;
+        }
+        const dist = await roadDistance(truck.lat, truck.lon, p.lat, p.lon);
+        out.push({ ...base, miles: Math.round(dist.miles * 10) / 10, etaMin: dist.etaMin, source: dist.source });
       }
-      const dist = await roadDistance(truck.lat, truck.lon, p.lat, p.lon);
-      points[unit] = { ...base, miles: Math.round(dist.miles * 10) / 10, etaMin: dist.etaMin, source: dist.source };
+      // Nearest first, so the point the driver hits next sits on top.
+      out.sort((a, b) => (a.miles == null) - (b.miles == null) || a.miles - b.miles);
+      points[unit] = out;
     }
     const out = { remindMi: TOLL_REMIND_MI, points };
     tpBoardCache = { data: out, at: Date.now() };
@@ -918,7 +999,7 @@ async function initDurable() {
     const as = await ghLoad("assignments.json");
     if (as && typeof as === "object" && !Array.isArray(as)) { assignments = as; migrateAssignments(); }
     const tp = await ghLoad("toll_points.json");
-    if (tp && typeof tp === "object" && !Array.isArray(tp)) tollPoints = tp;
+    if (tp && typeof tp === "object" && !Array.isArray(tp)) { tollPoints = tp; migrateTollPoints(); }
     const pr = await ghLoad("prices.json");
     if (pr && pr.prices) priceData = pr;
     const un = await ghLoad("unit_notes.json");
