@@ -8,6 +8,9 @@ let priceDate = null;          // effective date of the loaded Pilot price repor
 const ARRIVE_MI = 3;           // notify when an assigned truck is within this many miles of its stop
 let arrivedNotified = {};      // unit -> already alerted for this arrival
 const BRANDS = { pilot: "Pilot", loves: "Love's", ta: "TA/Petro" };
+let tpBoard = {};              // unit -> { label, miles, etaMin, ... } for toll reminder points
+let tpRemindMi = 20;           // remind this many miles out (the server owns the number)
+let tollReminded = {};         // unit -> already reminded on this approach
 
 const normNum = (s) => {
   s = String(s == null ? "" : s).trim().replace(/^#/, "");
@@ -125,6 +128,20 @@ function render() {
       ? `<span class="idle ${idleH >= 5 ? "high" : idleH >= 2 ? "mid" : ""}">${idleH.toFixed(1)}h</span><div class="driver-meta">${r.idleGallons != null ? r.idleGallons.toFixed(1) + " gal" : ""}</div>`
       : `<span style="color:var(--text-mute)">—</span>`;
 
+    // Toll reminder point (independent of the fuel stop — a unit can have both).
+    let tpHtml = "";
+    const tp = tpBoard[r.unit];
+    if (tp) {
+      const near = tp.miles != null && tp.miles <= tpRemindMi;
+      const mi = tp.miles != null ? `${tp.miles} mi` : (tp.error ? "no GPS" : "…");
+      const tip = esc(`${tp.label} — ${tp.miles != null ? tp.miles + " mi qoldi" : "masofa hisoblanmoqda"}`);
+      tpHtml = `<div class="fs-assigned tp-row ${near ? "near" : ""}">
+          <span class="fs-pill fs-pill-toll" title="${tip}">📍 ${esc(tp.label)}</span>
+          <span class="fs-mi">${mi}</span>
+          <button class="tp-clear" data-tpunit="${esc(r.unit)}" title="Toll nuqtasini olib tashlash">✕</button>
+        </div>`;
+    }
+
     let fsCell;
     if (r.assignedStop) {
       const a = r.assignedStop;                 // { brand, num }
@@ -138,9 +155,12 @@ function render() {
       const pr = a.brand === "pilot" ? priceMap[normNum(a.num)] : null;
       const priceHtml = pr && pr.your != null
         ? `<span class="fs-price" title="Retail $${(+pr.retail).toFixed(2)} · save $${(+pr.sav).toFixed(2)}/gal">$${(+pr.your).toFixed(2)}</span>` : "";
+      // The brand dropdown is gone once a stop is assigned, so offer the toll
+      // point behind a small pin button instead.
+      const addTp = tp ? "" : `<button class="tp-add" data-tpadd="${esc(r.unit)}" title="Toll nuqtasi qo'shish (Google Maps link)">📍</button>`;
       fsCell = `<div class="fs-assigned ${near ? "near" : ""}">
           <span class="fs-pill brand-${a.brand}" title="${tip}">${label} #${esc(a.num)}</span>
-          <span class="fs-mi">${miles}</span>${priceHtml}
+          <span class="fs-mi">${miles}</span>${priceHtml}${addTp}
           <button class="fs-clear" data-unit="${esc(r.unit)}" title="Tugatildi / tozalash">✕</button>
         </div>`;
     } else {
@@ -149,10 +169,12 @@ function render() {
             <option value="pilot">Pilot</option>
             <option value="loves">Love's</option>
             <option value="ta">TA/Petro</option>
+            <option value="point">📍 Toll point</option>
           </select>
           <input class="fs-inp" data-unit="${esc(r.unit)}" inputmode="numeric" placeholder="#" autocomplete="off">
         </div>`;
     }
+    fsCell += tpHtml;
     return `
       <tr>
         <td class="time-cell">${i + 1}</td>
@@ -195,16 +217,39 @@ function render() {
     });
   });
 
+  // Picking "Toll point" turns the station-number box into a link box.
+  tbody.querySelectorAll(".fs-brand").forEach(sel => {
+    sel.addEventListener("change", () => {
+      const form = sel.closest(".fs-assign-form");
+      const inp = form && form.querySelector(".fs-inp");
+      if (!inp) return;
+      const isPoint = sel.value === "point";
+      inp.placeholder = isPoint ? "Google Maps link" : "#";
+      inp.classList.toggle("fs-inp-wide", isPoint);
+      if (isPoint) inp.removeAttribute("inputmode"); else inp.setAttribute("inputmode", "numeric");
+      inp.focus();
+    });
+  });
   tbody.querySelectorAll(".fs-inp").forEach(inp => {
     inp.addEventListener("keydown", e => {
       if (e.key !== "Enter") return;
       const form = inp.closest(".fs-assign-form");
       const brand = form ? form.querySelector(".fs-brand").value : "pilot";
-      assignStop(inp.dataset.unit, brand, inp.value, inp);
+      if (brand === "point") assignTollPoint(inp.dataset.unit, inp.value, inp);
+      else assignStop(inp.dataset.unit, brand, inp.value, inp);
     });
   });
   tbody.querySelectorAll(".fs-clear").forEach(b => {
     b.addEventListener("click", () => clearStop(b.dataset.unit));
+  });
+  tbody.querySelectorAll(".tp-add").forEach(b => {
+    b.addEventListener("click", () => {
+      const link = prompt(`Unit ${b.dataset.tpadd} — toll nuqtasi\n\nGoogle Maps'da joyni bosib "Share → Copy link" qiling va shu yerga tashlang (yoki 41.2033,-77.1945 ko'rinishida koordinata):`);
+      if (link && link.trim()) assignTollPoint(b.dataset.tpadd, link.trim());
+    });
+  });
+  tbody.querySelectorAll(".tp-clear").forEach(b => {
+    b.addEventListener("click", () => clearTollPoint(b.dataset.tpunit));
   });
   tbody.querySelectorAll(".unit-note").forEach(b => {
     b.addEventListener("click", () => openNoteModal(b.dataset.noteunit));
@@ -287,10 +332,44 @@ async function clearStop(unit) {
   } catch (e) { alert("Xato: " + e.message); }
 }
 
+// Pin a toll point (Google Maps link or raw coords) to a unit.
+async function assignTollPoint(unit, link, inp) {
+  link = (link || "").trim();
+  if (!link) return;
+  if (inp) inp.disabled = true;
+  try {
+    const r = await fetch("/api/toll-point/assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unit, link }) });
+    const j = await r.json();
+    if (!j.ok) { alert(j.error || "Xato"); if (inp) { inp.disabled = false; inp.focus(); } return; }
+    tpBoard[unit] = { ...j.point, miles: null };   // miles arrive with the next board load
+    delete tollReminded[unit];
+    render();
+    loadFsBoard();
+  } catch (e) { alert("Xato: " + e.message); if (inp) inp.disabled = false; }
+}
+
+async function clearTollPoint(unit) {
+  try {
+    await fetch("/api/toll-point/clear", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unit }) });
+    delete tpBoard[unit];
+    delete tollReminded[unit];
+    render();
+  } catch (e) { alert("Xato: " + e.message); }
+}
+
 async function loadFsBoard() {
   try {
-    const r = await fetch("/api/fuel-stop/board");
-    if (r.ok) { fsBoard = await r.json(); checkArrivals(); render(); }
+    const [stops, points] = await Promise.all([
+      fetch("/api/fuel-stop/board").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch("/api/toll-point/board").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]);
+    if (stops) { fsBoard = stops; checkArrivals(); }
+    if (points) {
+      tpBoard = points.points || {};
+      if (points.remindMi) tpRemindMi = points.remindMi;
+      checkTollPoints();
+    }
+    if (stops || points) render();
   } catch {}
 }
 
@@ -313,6 +392,28 @@ function notifyArrival(unit, info) {
   showToast("🅿️ " + msg);
   beep();
   try { if (window.Notification && Notification.permission === "granted") new Notification("MOVEX — Fuel stop", { body: msg }); } catch {}
+}
+
+// Remind dispatch once per approach, while the truck is still tpRemindMi out —
+// early enough to call the driver before he commits to the toll road.
+function checkTollPoints() {
+  for (const unit in tpBoard) {
+    const info = tpBoard[unit];
+    if (!info || info.miles == null) continue;
+    if (info.miles <= tpRemindMi) {
+      if (!tollReminded[unit]) { tollReminded[unit] = true; notifyTollPoint(unit, info); }
+    } else if (info.miles > tpRemindMi + 10) {
+      delete tollReminded[unit];   // drove away -> a later approach reminds again
+    }
+  }
+  for (const u in tollReminded) if (!tpBoard[u]) delete tollReminded[u]; // point removed
+}
+
+function notifyTollPoint(unit, info) {
+  const msg = `Unit ${unit} → ${info.label} ga ${info.miles} mi qoldi — driverga toll eslatmasini bering`;
+  showToast("📍 " + msg);
+  beep();
+  try { if (window.Notification && Notification.permission === "granted") new Notification("MOVEX — Toll reminder", { body: msg }); } catch {}
 }
 
 function showToast(text) {

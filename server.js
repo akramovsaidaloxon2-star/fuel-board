@@ -268,6 +268,66 @@ function saveAssignments() {
 let fsBoardCache = { data: null, at: 0 };
 const FSBOARD_MS = 50 * 1000; // ~50s so the 60s board poll always recomputes miles
 
+// --- Toll reminder points: an arbitrary spot (picked in Google Maps) per unit ---
+// The board warns dispatch while the truck is still TOLL_REMIND_MI out, so the
+// driver can be reminded about the directed route before he reaches the toll.
+const TOLLPT_STORE = path.join(__dirname, "toll_points.json");
+let tollPoints = {}; // { unit: { label, lat, lon, url, at } }
+try { tollPoints = JSON.parse(fs.readFileSync(TOLLPT_STORE, "utf8")); } catch { tollPoints = {}; }
+function saveTollPoints() {
+  fs.writeFile(TOLLPT_STORE, JSON.stringify(tollPoints), () => {});
+  ghSave("toll_points.json", tollPoints);
+}
+let tpBoardCache = { data: null, at: 0 };
+const TOLL_REMIND_MI = 20; // how far out the reminder fires (road miles)
+
+// Pull one coordinate out of whatever Google Maps hands over: a share link, a
+// full desktop URL, a directions link, or coordinates typed by hand. No API key
+// and no geocoder involved — every pattern below is already in the URL itself.
+async function resolveMapPoint(input) {
+  let u = String(input || "").trim();
+  if (!u) return null;
+  // Typed straight in: "34.05, -118.24"
+  const raw = u.match(/^\s*(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/);
+  if (raw) {
+    const lat = +raw[1], lon = +raw[2];
+    if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) return { lat, lon, label: `${lat}, ${lon}` };
+    return null;
+  }
+  if (!/^https?:\/\//i.test(u)) return null;
+  // Short share links (maps.app.goo.gl/…) only carry the coords after redirect.
+  if (/goo\.gl/.test(u)) {
+    try { const r = await fetch(u, { redirect: "follow", signal: AbortSignal.timeout(10000) }); u = r.url || u; } catch {}
+  }
+  const pick = (lat, lon) => (Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? { lat, lon } : null);
+  let pt = null;
+  // 1) Pinned place: !3d<lat>!4d<lon> — the exact marker, most precise.
+  let m = [...u.matchAll(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/g)].pop();
+  if (m) pt = pick(+m[1], +m[2]);
+  // 2) ?q= / ?query= / ?destination= carrying "lat,lon".
+  if (!pt) {
+    m = u.match(/[?&](?:q|query|destination|center)=(-?\d+\.\d+)(?:,|%2C)(-?\d+\.\d+)/i);
+    if (m) pt = pick(+m[1], +m[2]);
+  }
+  // 3) Directions waypoints: !1d<lon>!2d<lat> — take the last stop (the target).
+  if (!pt) {
+    m = [...u.matchAll(/!1d(-?\d+\.\d+)!2d(-?\d+\.\d+)/g)].pop();
+    if (m) pt = pick(+m[2], +m[1]);
+  }
+  // 4) Map centre: /@<lat>,<lon>,<zoom>z — a rougher fallback (the view, not a pin).
+  if (!pt) {
+    m = u.match(/\/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+    if (m) pt = pick(+m[1], +m[2]);
+  }
+  if (!pt) return null;
+  // Name it from the /place/<name>/ segment when Google put one there.
+  let label = "";
+  const pm = u.match(/\/maps\/place\/([^/@?]+)/);
+  if (pm) label = decodeURIComponent(pm[1].replace(/\+/g, " ")).trim();
+  if (!label) label = `${pt.lat.toFixed(4)}, ${pt.lon.toFixed(4)}`;
+  return { ...pt, label: label.slice(0, 60) };
+}
+
 // --- Per-unit notes (driver quirks: uses exits, no calls, etc.) — durable ---
 const UNOTES_STORE = path.join(__dirname, "unit_notes.json");
 let unitNotes = {};
@@ -773,6 +833,65 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // --- Toll reminder point: pin a spot from Google Maps, watch the miles left ---
+  if (req.url === "/api/toll-point/assign" && req.method === "POST") {
+    const body = await readBody(req);
+    const unit = (body && body.unit || "").trim();
+    const link = (body && (body.link || body.point) || "").trim();
+    if (!unit || !link) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "unit va Google Maps link kerak" }));
+      return;
+    }
+    const pt = await resolveMapPoint(link);
+    if (!pt) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Linkdan joy o'qib bo'lmadi. Google Maps'da joyni bosib 'Share → Copy link' qiling, yoki 41.2033,-77.1945 ko'rinishida koordinata yozing." }));
+      return;
+    }
+    tollPoints[unit] = { label: (body.label || "").trim() || pt.label, lat: pt.lat, lon: pt.lon, url: link, at: new Date().toISOString() };
+    saveTollPoints();
+    tpBoardCache = { data: null, at: 0 };
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, unit, point: tollPoints[unit] }));
+    return;
+  }
+  if (req.url === "/api/toll-point/clear" && req.method === "POST") {
+    const body = await readBody(req);
+    const unit = (body && body.unit || "").trim();
+    if (tollPoints[unit]) { delete tollPoints[unit]; saveTollPoints(); tpBoardCache = { data: null, at: 0 }; }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  // Road miles from each truck to its toll point (same ~50s cache as the stop board).
+  if (req.url.startsWith("/api/toll-point/board")) {
+    if (tpBoardCache.data && Date.now() - tpBoardCache.at < FSBOARD_MS) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(tpBoardCache.data));
+      return;
+    }
+    let data;
+    try { data = await getFuelData(); } catch (e) { data = { fleet: [] }; }
+    const points = {};
+    for (const unit of Object.keys(tollPoints)) {
+      const p = tollPoints[unit];
+      const base = { label: p.label, lat: p.lat, lon: p.lon, url: p.url };
+      const truck = data.fleet.find((x) => x.unit === unit);
+      if (!truck || truck.lat == null || truck.lon == null) {
+        points[unit] = { ...base, miles: null, error: "no-location" };
+        continue;
+      }
+      const dist = await roadDistance(truck.lat, truck.lon, p.lat, p.lon);
+      points[unit] = { ...base, miles: Math.round(dist.miles * 10) / 10, etaMin: dist.etaMin, source: dist.source };
+    }
+    const out = { remindMi: TOLL_REMIND_MI, points };
+    tpBoardCache = { data: out, at: Date.now() };
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(out));
+    return;
+  }
+
   serveStatic(req, res);
 });
 
@@ -798,6 +917,8 @@ async function initDurable() {
     if (o && typeof o === "object") odoDaily = o;
     const as = await ghLoad("assignments.json");
     if (as && typeof as === "object" && !Array.isArray(as)) { assignments = as; migrateAssignments(); }
+    const tp = await ghLoad("toll_points.json");
+    if (tp && typeof tp === "object" && !Array.isArray(tp)) tollPoints = tp;
     const pr = await ghLoad("prices.json");
     if (pr && pr.prices) priceData = pr;
     const un = await ghLoad("unit_notes.json");

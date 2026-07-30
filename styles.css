@@ -486,6 +486,17 @@ footer {
 .fs-clear:hover { color: var(--critical); background: var(--row-hover); }
 .fs-price { color: var(--full); font-weight: 700; font-size: 13px; }
 
+/* Toll reminder point — a second row under the fuel stop in the same cell */
+.fs-inp.fs-inp-wide { width: 150px; font-size: 12px; }
+.tp-row { margin-top: 4px; }
+.fs-pill-toll { background: #7c5cff; max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+.tp-row.near .fs-mi { color: var(--mid); }
+.tp-row.near .fs-pill-toll { box-shadow: 0 0 0 2px rgba(124, 92, 255, .35); }
+.tp-add, .tp-clear { background: none; border: none; color: var(--text-mute); cursor: pointer;
+  font-size: 13px; line-height: 1; padding: 2px 4px; border-radius: 4px; }
+.tp-add:hover { color: #7c5cff; background: var(--row-hover); }
+.tp-clear:hover { color: var(--critical); background: var(--row-hover); }
+
 /* Per-unit note button on the fuel board */
 .note-cell { text-align: center; }
 .note-cell.has-note { background: rgba(245, 158, 11, 0.18); box-shadow: inset 3px 0 0 #f59e0b; }
