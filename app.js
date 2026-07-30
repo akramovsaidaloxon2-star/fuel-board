@@ -576,17 +576,9 @@ function setupTabs() {
       $("#view-coverage").classList.toggle("hidden", view !== "coverage");
       $("#view-idle").classList.toggle("hidden", view !== "idle");
       $("#view-map").classList.toggle("hidden", view !== "map");
-      $("#view-reports").classList.toggle("hidden", view !== "reports");
-      $("#view-ranking").classList.toggle("hidden", view !== "ranking");
-      $("#view-toll").classList.toggle("hidden", view !== "toll");
-      $("#view-routecheck").classList.toggle("hidden", view !== "routecheck");
       if (view === "coverage") renderCoverage();
       if (view === "idle") renderIdle();
       if (view === "map") renderMap();
-      if (view === "reports" && window.initReports) window.initReports();
-      if (view === "ranking" && window.initRanking) window.initRanking();
-      if (view === "toll" && window.initToll) window.initToll();
-      if (view === "routecheck" && window.initRouteCheck) window.initRouteCheck();
     });
   });
 }
@@ -658,13 +650,11 @@ if (priceBtn) priceBtn.addEventListener("click", () => $("#price-file").click())
 const priceFileInput = $("#price-file");
 if (priceFileInput) priceFileInput.addEventListener("change", (e) => { if (e.target.files[0]) uploadPriceFile(e.target.files[0]); });
 
-// Role-based access: workers get everything EXCEPT the Toll board.
+// Role is still reported by /api/me; every remaining view is open to both roles.
 fetch("/api/me").then((r) => r.json()).then((j) => {
   ROLE = j.role || "manager";
   document.body.classList.toggle("role-worker", ROLE === "worker");
   if (ROLE === "worker") {
-    const b = document.querySelector(`.tab[data-view="toll"]`);
-    if (b) b.remove();
     const badge = document.querySelector(".subtitle");
     if (badge) badge.textContent = "Worker view";
   }

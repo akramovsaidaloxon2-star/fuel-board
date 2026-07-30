@@ -292,50 +292,6 @@ body.light .fuel-pct.full { color: var(--text); }
 .idle-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
 .idle-table tr:hover td { background: var(--surface-2); }
 
-.rep-uploads { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
-.drop {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
-  border: 1.5px dashed var(--border); border-radius: 12px; padding: 22px 16px;
-  background: var(--surface); cursor: pointer; text-align: center;
-}
-.drop:hover, .drop.drag { border-color: var(--accent); background: var(--surface-2); }
-.drop.ok { border-color: var(--full); border-style: solid; }
-.drop .ti { font-size: 26px; color: var(--text-dim); }
-.drop-title { font-weight: 600; font-size: 14px; }
-.drop-sub { font-size: 12px; color: var(--text-mute); }
-.rep-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
-.rep-period { font-size: 13px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
-.rep-controls select { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 8px; }
-.rep-warn { background: rgba(245,213,71,0.12); border: 1px solid rgba(245,213,71,0.4); color: var(--mid); padding: 8px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 10px; }
-.rep-hist { cursor: pointer; }
-.rep-hist:hover { border-color: var(--accent); }
-.rep-hsel { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 8px; margin-left: auto; max-width: 280px; }
-.rep-sortable th { cursor: pointer; user-select: none; white-space: nowrap; }
-.rep-sortable th:hover { color: var(--text); background: var(--surface-2); }
-.rep-sortable th .arrow { color: var(--accent); font-variant-numeric: tabular-nums; }
-.rank-val { font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 4px; }
-.rank-val.good { color: var(--full); }
-.rank-val.bad { color: var(--critical); }
-.rank-table th[data-rcol] { cursor: pointer; user-select: none; white-space: nowrap; }
-.rank-table th[data-rcol]:hover { color: var(--text); background: var(--surface-2); }
-.rank-table th.active { color: var(--accent); }
-.rank-pos { font-weight: 600; font-size: 15px; text-align: center; width: 44px; }
-
-.toll-table { font-size: 12px; }
-.toll-table th { white-space: nowrap; font-size: 10px; text-align: center; }
-.toll-table td { padding: 3px 4px; text-align: center; }
-.toll-table input { height: 28px; font-size: 12px; padding: 0 6px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 5px; text-align: center; }
-.toll-table input:focus { border-color: var(--accent); outline: none; }
-.toll-table input[type="date"] { font-size: 11px; padding: 0 4px; cursor: pointer; }
-.toll-table input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); cursor: pointer; }
-body.light .toll-table input[type="date"]::-webkit-calendar-picker-indicator { filter: none; }
-.toll-auto { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: center; }
-.toll-status { height: 28px; font-size: 11px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 5px; }
-.toll-status.ok { background: rgba(43,182,115,0.18); color: var(--full); border-color: var(--full); }
-.toll-status.no { background: rgba(226,75,74,0.18); color: var(--critical); border-color: var(--critical); }
-.toll-del { padding: 4px 8px; color: var(--critical); }
-@media (max-width: 640px) { .rep-uploads { grid-template-columns: 1fr; } }
-
 #map {
   height: calc(100vh - 200px);
   min-height: 480px;
@@ -523,21 +479,6 @@ footer {
   padding: 3px 8px; border-radius: 999px; }
 .fs-pill.brand-loves { background: #c8860a; }
 .fs-pill.brand-ta { background: #138a72; }
-
-/* --- Low-MPG manual review (checked list) --- */
-#rep-lowmpg-list { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
-.lowmpg-item.rev-good { border-color: var(--full); }
-.lowmpg-item.rev-bad { border-color: var(--critical); }
-.rev-btns { display: flex; gap: 6px; margin-top: 6px; }
-.rev-btn { flex: 1; border: 1px solid var(--border); background: var(--surface); color: var(--text-dim);
-  border-radius: 6px; padding: 5px 6px; font-size: 12px; cursor: pointer; white-space: nowrap; }
-.rev-btn:hover { border-color: var(--text-dim); }
-.rev-btn.good.on { background: var(--full); border-color: var(--full); color: #06281c; font-weight: 600; }
-.rev-btn.bad.on { background: var(--critical); border-color: var(--critical); color: #2a0a0a; font-weight: 600; }
-.rev-note { margin-top: 6px; width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text);
-  border-radius: 6px; padding: 5px 7px; font-size: 12px; }
-.rev-note:focus { outline: none; border-color: var(--accent); }
-.rep-check-btn { margin-top: 6px; }
 .fs-mi { color: var(--text); font-size: 13px; font-weight: 600; }
 .fs-assigned.near .fs-mi { color: var(--full); }
 .fs-clear { background: none; border: none; color: var(--text-mute); cursor: pointer; font-size: 13px;
@@ -569,23 +510,6 @@ footer {
 .gal-limit.set { color: #f59e0b; border-color: #f59e0b; border-style: solid; font-weight: 600; }
 .gal-limit-inp { width: 64px; font-size: 11px; background: var(--surface-2); border: 1px solid var(--accent); color: var(--text); border-radius: 5px; padding: 2px 6px; }
 
-/* Reports: editable rows + delete buttons */
-.rep-edit { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 5px; padding: 4px 6px; font-size: 12px; text-align: center; }
-.rep-edit:focus { outline: none; border-color: var(--accent); background: var(--surface); }
-.rep-d { color: var(--text-dim); font-variant-numeric: tabular-nums; }
-.rep-row-del, .rep-card-del { background: none; border: 1px solid var(--border); color: var(--text-mute); cursor: pointer; border-radius: 5px; font-size: 12px; line-height: 1; padding: 3px 7px; }
-.rep-row-del:hover, .rep-card-del:hover { color: #fff; background: var(--critical); border-color: var(--critical); }
-.cov-item.rep-hist { position: relative; }
-.rep-card-del { position: absolute; top: 6px; right: 6px; padding: 1px 6px; }
-
-/* Reports: unmatched units panel */
-.rep-unmatched { margin: 12px 0; background: var(--surface-2); border: 1px solid var(--low); border-left: 4px solid var(--low); border-radius: 8px; padding: 14px 16px; }
-.rep-unmatched h3 { margin: 0 0 8px; font-size: 15px; color: var(--low); }
-.rep-unmatched .um-row { margin: 6px 0; line-height: 1.9; }
-.rep-unmatched .um-lbl { color: var(--text-dim); font-size: 13px; margin-right: 6px; }
-.um-pill { display: inline-block; background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600; margin: 2px 4px 2px 0; }
-.um-pill.orphan { border-color: var(--accent); color: var(--accent); }
-
 /* Arrival toast notifications (fuel-stop reached) */
 .toasts { position: fixed; top: 16px; right: 16px; z-index: 2000; display: flex; flex-direction: column; gap: 10px; max-width: 380px; }
 .toast { display: flex; align-items: center; gap: 12px; background: var(--full); color: #fff; font-size: 14px; font-weight: 600;
@@ -594,81 +518,7 @@ footer {
 .toast.show { transform: none; opacity: 1; }
 .toast-x { background: none; border: none; color: #fff; cursor: pointer; font-size: 13px; line-height: 1; opacity: .85; }
 .toast-x:hover { opacity: 1; }
-
-/* Truck route check */
-.rc-card { margin-top: 16px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
-.rc-verdict { font-size: 22px; font-weight: 800; margin-bottom: 14px; }
-.rc-verdict.ok { color: var(--full); }
-.rc-verdict.bad { color: var(--critical); }
-.rc-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-.rc-grid > div { display: flex; flex-direction: column; gap: 3px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
-.rc-grid span { color: var(--text-mute); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
-.rc-grid b { color: var(--text); font-size: 16px; }
-.rc-grid small { color: var(--text-dim); font-size: 12px; }
-.rc-note { color: var(--text-dim); font-size: 13px; margin: 12px 0 0; line-height: 1.5; }
-.rc-note.dim { color: var(--text-mute); font-size: 12px; }
-.rc-link { display: inline-block; margin: 14px 0 4px; background: var(--accent); color: #fff; font-weight: 600; font-size: 14px; padding: 10px 16px; border-radius: 8px; text-decoration: none; }
-.rc-link:hover { filter: brightness(1.08); }
-@media (max-width: 700px) { .rc-grid { grid-template-columns: repeat(2, 1fr); } }
-
-/* Toll controls: separators + selects */
-.toll-sep { display: inline-block; width: 1px; height: 22px; background: var(--border); margin: 0 3px; vertical-align: middle; }
-#toll-rep-type, #toll-rep-sel, #toll-rep-label { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 7px 8px; font-size: 13px; }
-#toll-rep-type:focus, #toll-rep-sel:focus, #toll-rep-label:focus { outline: none; border-color: var(--accent); }
 .btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-
-/* Toll board footer: TOTAL + soft saving rows (like the report) */
-#toll-foot .r { text-align: right; font-weight: 600; color: var(--text-dim); }
-#toll-foot td { font-variant-numeric: tabular-nums; }
-.toll-total-row td { font-weight: 700; background: rgba(245, 158, 11, 0.18); border-top: 2px solid var(--border); }
-.toll-foot-x td, .toll-foot-soft td { background: var(--surface-2); }
-.toll-foot-soft td { font-weight: 700; }
-.toll-foot-soft td:nth-child(2), .toll-foot-soft td:nth-child(4) { color: var(--accent); }
-
-/* Toll "how it works" help panel */
-.toll-help { margin: 14px 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); padding: 16px 18px; }
-.toll-help-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-.toll-help-top h3 { margin: 0; font-size: 16px; }
-.toll-help-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
-.toll-help-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
-.toll-help-card.wide { grid-column: 1 / -1; }
-.toll-help-card h4 { margin: 0 0 8px; font-size: 14px; }
-.toll-help-card ul { margin: 0; padding-left: 18px; }
-.toll-help-card li { font-size: 13px; line-height: 1.7; color: var(--text); }
-.toll-help-card b { color: var(--text); }
-
-/* Toll header — Excel look: yellow, bold, green Status, bigger + neat grid */
-.toll-table thead th {
-  padding: 12px 8px;
-  font-size: 13.5px;
-  font-weight: 700;
-  color: #1a1a1a;
-  background: #ffe83d;
-  border: 1px solid #d4b400;
-  text-align: center;
-  white-space: normal;
-  line-height: 1.15;
-  vertical-align: middle;
-  text-transform: none;
-  letter-spacing: 0;
-}
-.toll-table thead th.toll-status-h {
-  background: #4ea72e;
-  color: #fff;
-  border-color: #3c8a22;
-}
-/* Neat spreadsheet gridlines on the body */
-.toll-table td { border: 1px solid var(--border); }
-.toll-table tbody tr:nth-child(even) td { background: rgba(127, 127, 127, 0.05); }
-
-/* Status cell: dropdown + note button (centered) */
-.toll-status-cell { display: flex; align-items: center; justify-content: center; gap: 4px; }
-.toll-note {
-  height: 26px; min-width: 28px; padding: 0; font-size: 13px; line-height: 1; cursor: pointer;
-  background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); border-radius: 5px;
-}
-.toll-note:hover { border-color: var(--accent); color: var(--text); }
-.toll-note.has { background: rgba(245, 158, 11, 0.18); border-color: #f59e0b; color: #f59e0b; }
 
 /* Pilot daily price upload bar */
 .price-bar { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; }

@@ -58,13 +58,6 @@ function sessionRole(req) {
   if (!AUTH_ON) return "manager"; // open (local dev) -> full
   return verifyToken(getCookie(req, "mvx_session"));
 }
-function mgrOnly(req, res) {
-  if (req._role === "manager") return true;
-  res.writeHead(403, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ ok: false, error: "forbidden" }));
-  return false;
-}
-
 if (!API_KEY) {
   console.error("⚠  MOTIVE_API_KEY is missing. Add it to .env");
 }
@@ -220,19 +213,6 @@ function recordOdo(unit, odo, atISO) {
   odoDaily[unit][day] = Math.round(odo); // latest reading of the day wins
   saveOdo();
 }
-// Accurate period miles = odometer(end) - odometer(just before start). Needs snapshots.
-function getOdoMiles(unit, start, end) {
-  const days = odoDaily[unit];
-  if (!days) return null;
-  const dates = Object.keys(days).sort();
-  const endDate = dates.filter((d) => d <= end).pop();
-  let startDate = dates.filter((d) => d < start).pop();
-  if (!startDate) startDate = dates.filter((d) => d >= start && d <= end)[0]; // fallback: first day in range
-  if (!endDate || !startDate || endDate <= startDate) return null;
-  const m = days[endDate] - days[startDate];
-  return m > 0 ? Math.round(m) : null;
-}
-
 // --- Fuel-station directories (store number -> coords) per brand, built by scrapers ---
 function loadStations(file) { try { return JSON.parse(fs.readFileSync(path.join(__dirname, file), "utf8")); } catch { return {}; } }
 const brandStations = {
@@ -261,89 +241,6 @@ async function roadDistance(lat1, lon1, lat2, lon2) {
     }
   } catch (e) { /* fall through */ }
   return { miles: haversineMiles(lat1, lon1, lat2, lon2), etaMin: null, source: "air" };
-}
-
-// --- Truck route check via OpenRouteService (car vs heavy-vehicle profile) ---
-const ORS_KEY = process.env.ORS_KEY || "";
-const ORS_ON = !!ORS_KEY;
-async function orsDirections(profile, coords, wantGeom) {
-  try {
-    const r = await fetch(`https://api.openrouteservice.org/v2/directions/${profile}${wantGeom ? "/geojson" : ""}`, {
-      method: "POST",
-      headers: { Authorization: ORS_KEY, "Content-Type": "application/json" },
-      body: JSON.stringify({ coordinates: coords, radiuses: coords.map(() => 1500) }),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!r.ok) return { ok: false, status: r.status };
-    const j = await r.json();
-    if (wantGeom) {
-      const f = j.features && j.features[0];
-      if (!f) return { ok: false };
-      return { ok: true, meters: f.properties.summary.distance, geom: f.geometry.coordinates, warnings: (f.properties.warnings || []).map((w) => w.message) };
-    }
-    const rt = j.routes && j.routes[0];
-    if (!rt) return { ok: false };
-    return { ok: true, meters: rt.summary.distance, warnings: (rt.warnings || []).map((w) => w.message) };
-  } catch (e) { return { ok: false, error: String(e.message || e) }; }
-}
-// Build a Google Maps directions link from a route's geometry (sampled waypoints),
-// so opening it forces Google to follow the truck-safe path.
-function sampleGoogleUrl(geom, n = 10) {
-  if (!Array.isArray(geom) || geom.length < 2) return null;
-  const pts = [], step = (geom.length - 1) / (n - 1);
-  for (let i = 0; i < n; i++) { const c = geom[Math.round(i * step)]; pts.push(`${c[1].toFixed(5)},${c[0].toFixed(5)}`); }
-  return "https://www.google.com/maps/dir/" + pts.join("/");
-}
-async function orsGeocode(text) {
-  try {
-    const r = await fetch(`https://api.openrouteservice.org/geocode/search?api_key=${encodeURIComponent(ORS_KEY)}&text=${encodeURIComponent(text)}&boundary.country=US&size=1`, { signal: AbortSignal.timeout(12000) });
-    if (!r.ok) return null;
-    const j = await r.json();
-    const f = j.features && j.features[0];
-    return f ? { coord: f.geometry.coordinates, label: f.properties.label } : null;
-  } catch { return null; }
-}
-async function orsReverse(lon, lat) {
-  try {
-    const r = await fetch(`https://api.openrouteservice.org/geocode/reverse?api_key=${encodeURIComponent(ORS_KEY)}&point.lon=${lon}&point.lat=${lat}&size=1`, { signal: AbortSignal.timeout(10000) });
-    if (!r.ok) return null;
-    const j = await r.json();
-    const f = j.features && j.features[0];
-    return f ? f.properties.label : null;
-  } catch { return null; }
-}
-async function resolveGoogleLink(url) {
-  let u = String(url || "").trim();
-  if (!u) return null;
-  if (/goo\.gl|maps\.app\.goo\.gl/.test(u)) {
-    try { const r = await fetch(u, { redirect: "follow", signal: AbortSignal.timeout(10000) }); u = r.url || u; } catch {}
-  }
-  // 1) Exact waypoint coords from Google's data= param (!1d<lon>!2d<lat> per stop) — most accurate, no geocoding guess.
-  const coords = [];
-  for (const m of u.matchAll(/!1d(-?\d+\.\d+)!2d(-?\d+\.\d+)/g)) {
-    let lon = parseFloat(m[1]), lat = parseFloat(m[2]);
-    if (Math.abs(lat) > 90 && Math.abs(lon) <= 90) { const t = lon; lon = lat; lat = t; }
-    if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) coords.push([lon, lat]);
-  }
-  if (coords.length >= 2) return { coords };
-  // 2) Fallback: place-name segments from /dir/ (geocoded).
-  const m = u.match(/\/maps\/dir\/([^@?]+)/);
-  if (!m) return null;
-  const names = m[1].split("/").map((s) => decodeURIComponent(s.replace(/\+/g, " ")).trim())
-    .filter((s) => s && !s.startsWith("data=") && !s.startsWith("@"));
-  return names.length >= 2 ? { names } : null;
-}
-// Turn a list of "lat,lng" or place-name strings into ORS [lon,lat] coords.
-async function pointsToCoords(items) {
-  const coords = [], labels = [];
-  for (const s of items) {
-    const m = String(s).match(/^\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)\s*$/);
-    if (m) { coords.push([+m[2], +m[1]]); labels.push(`${m[1]}, ${m[2]}`); continue; }
-    const g = await orsGeocode(s);
-    if (!g) return { error: `Topilmadi: "${s}"` };
-    coords.push(g.coord); labels.push(g.label || s);
-  }
-  return { coords, labels };
 }
 
 // --- Per-unit fuel-stop assignments (which Pilot station each truck is sent to) ---
@@ -662,144 +559,12 @@ function captureWebhook(req, res) {
   });
 }
 
-// --- Saved fuel reports (weekly/monthly), persisted by date ---
-const REPORTS_STORE = path.join(__dirname, "reports_data.json");
-let reports = [];
-try { reports = JSON.parse(fs.readFileSync(REPORTS_STORE, "utf8")); } catch { reports = []; }
-function saveReports() {
-  fs.writeFile(REPORTS_STORE, JSON.stringify(reports), () => {});
-  ghSave("reports_data.json", reports);
-}
-
-// --- Toll / route-compliance board (manually entered, persisted) ---
-const TOLL_STORE = path.join(__dirname, "toll_data.json");
-let tollRows = [];
-try { tollRows = JSON.parse(fs.readFileSync(TOLL_STORE, "utf8")); } catch { tollRows = []; }
-function saveToll() {
-  fs.writeFile(TOLL_STORE, JSON.stringify(tollRows), () => {});
-  ghSave("toll_data.json", tollRows);
-}
-// Public read-only CSV of the toll board (token-gated) for a Google Sheets =IMPORTDATA share.
-const TOLL_CSV_KEY = process.env.TOLL_CSV_KEY || crypto.createHmac("sha256", SESSION_SECRET).update("toll-csv-v1").digest("hex").slice(0, 20);
-function csvCell(v) {
-  if (v == null) return "";
-  const s = String(v);
-  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-}
-function tollToCsv(rows) {
-  const head = ["Driver", "Unit", "Load ID", "Date", "From>To", "Toll calc", "Given dir", "Est diff", "Status", "DH", "Dispatched", "Directed", "Extra", "Driven", "Total Driven", "Driven toll", "Charge"];
-  const lines = [head.join(",")];
-  for (const r of rows || []) {
-    const est = (r.tollCalc != null && r.givenDir != null) ? (r.tollCalc - r.givenDir) : "";
-    const extra = (r.directed != null && r.dispatched != null) ? (r.directed - r.dispatched) : "";
-    lines.push([r.driver, r.unit, r.loadId, r.date, r.route, r.tollCalc, r.givenDir, est, r.status, r.dh, r.dispatched, r.directed, extra, r.driven, r.totalDriven, r.drivenToll, r.charge].map(csvCell).join(","));
-  }
-  return lines.join("\n");
-}
-
-// --- Saved toll reports (weekly/monthly snapshots), durable like fuel reports ---
-const TOLLREP_STORE = path.join(__dirname, "toll_reports_data.json");
-let tollReports = [];
-try { tollReports = JSON.parse(fs.readFileSync(TOLLREP_STORE, "utf8")); } catch { tollReports = []; }
-function saveTollReports() {
-  fs.writeFile(TOLLREP_STORE, JSON.stringify(tollReports), () => {});
-  ghSave("toll_reports_data.json", tollReports);
-}
 function readBody(req) {
   return new Promise((resolve) => {
     let b = "";
     req.on("data", (c) => { b += c; if (b.length > 10e6) req.destroy(); });
     req.on("end", () => { try { resolve(JSON.parse(b)); } catch { resolve(null); } });
   });
-}
-
-// --- Fuel transaction location check (was the truck at the fuel stop?) ---
-let vehIdMap = null, vehIdMapAt = 0;
-async function getVehicleIdMap() {
-  if (vehIdMap && Date.now() - vehIdMapAt < 30 * 60 * 1000) return vehIdMap;
-  const map = {};
-  for (let page = 1; page <= 5; page++) {
-    const res = await fetch(`${MOTIVE_BASE}/v1/vehicle_locations?per_page=100&page_no=${page}`, { headers: { "X-Api-Key": API_KEY } });
-    if (!res.ok) break;
-    const j = await res.json();
-    (j.vehicles || []).forEach((w) => { map[String(w.vehicle.number).trim()] = w.vehicle.id; });
-    if (!j.pagination || page * 100 >= j.pagination.total) break;
-  }
-  vehIdMap = map; vehIdMapAt = Date.now();
-  return map;
-}
-async function fetchUnitPeriods(id, startISO, endISO) {
-  const periods = []; let page = 1, total = Infinity;
-  while ((page - 1) * 100 < total && page <= 6) {
-    const url = `${MOTIVE_BASE}/v1/driving_periods?vehicle_ids[]=${id}&start_date=${encodeURIComponent(startISO)}&end_date=${encodeURIComponent(endISO)}&per_page=100&page_no=${page}`;
-    const res = await fetch(url, { headers: { "X-Api-Key": API_KEY } });
-    if (!res.ok) break;
-    const j = await res.json();
-    const arr = j.driving_periods || [];
-    arr.forEach((w) => { const p = w.driving_period; periods.push({ st: new Date(p.start_time).getTime(), en: new Date(p.end_time).getTime(), o: p.origin, d: p.destination }); });
-    total = j.pagination ? j.pagination.total : arr.length;
-    if (!arr.length) break; page++;
-  }
-  return periods;
-}
-function addrState(a) { const m = String(a || "").match(/,\s*([A-Z]{2})\s*\d{5}/); return m ? m[1] : null; }
-function addrCity(a) { const m = String(a || "").match(/,\s*([^,]+),\s*[A-Z]{2}\s*\d{5}/); return m ? m[1].trim() : null; }
-async function checkTransactions(periodStart, periodEnd, transactions) {
-  const idMap = await getVehicleIdMap();
-  const byUnit = {};
-  transactions.forEach((t) => { (byUnit[t.unit] = byUnit[t.unit] || []).push(t); });
-  const startISO = (periodStart || "2026-01-01") + "T00:00:00Z";
-  const endISO = (periodEnd || periodStart || "2026-12-31") + "T23:59:59Z";
-  const W = 4 * 3600 * 1000;
-  const out = [];
-  for (const unit of Object.keys(byUnit)) {
-    let id = idMap[unit];
-    if (!id && /^\d+$/.test(unit)) id = idMap[unit.padStart(4, "0")];
-    let periods = [];
-    if (id) { try { periods = await fetchUnitPeriods(id, startISO, endISO); } catch {} }
-    for (const t of byUnit[unit]) {
-      const T = new Date(t.date + "T" + (t.time || "00:00") + ":00Z").getTime();
-      const states = new Set(), cities = [];
-      const add = (a) => { const s = addrState(a); if (s) states.add(s); const c = addrCity(a); if (c) cities.push(c); };
-      // periods overlapping a window around the fuel time (truck driving then)
-      periods.filter((p) => p.en >= T - W && p.st <= T + W).forEach((p) => { add(p.o); add(p.d); });
-      // truck fuels while stopped: take the destination of the last trip before T
-      // and the origin of the first trip after T (that parked spot ~ the fuel stop).
-      let prev = null, next = null;
-      for (const p of periods) {
-        if (p.en <= T && (!prev || p.en > prev.en)) prev = p;
-        if (p.st >= T && (!next || p.st < next.st)) next = p;
-      }
-      if (prev) add(prev.d);
-      if (next) add(next.o);
-      const fuelSt = String(t.state || "").toUpperCase();
-      let verdict = "unknown";
-      if (!id) verdict = "no-motive";
-      else if (!states.size) verdict = "no-data";
-      else if (states.has(fuelSt)) verdict = "ok";
-      else verdict = "mismatch";
-
-      // Did the tank fuel level actually rise around the transaction? (strongest proof)
-      const series = fuelSeries[unit] || (/^\d+$/.test(unit) ? fuelSeries[unit.padStart(4, "0")] : null) || [];
-      const FW = 6 * 3600 * 1000;
-      const before = series.filter((p) => p[0] <= T && p[0] >= T - FW).map((p) => p[1]);
-      const after = series.filter((p) => p[0] >= T && p[0] <= T + FW).map((p) => p[1]);
-      let fuelVerdict = "no-fuel-data", rise = null;
-      if (before.length && after.length) {
-        rise = +(Math.max(...after) - Math.min(...before)).toFixed(1);
-        fuelVerdict = rise > 10 ? "rose" : "no-rise";
-      }
-      // Combined: fuel-level evidence wins when we have it.
-      let combined = verdict;
-      if (fuelVerdict === "rose") combined = "all-good";
-      else if (fuelVerdict === "no-rise") combined = "fraud";
-
-      out.push({ unit, date: t.date, time: t.time, fuelCity: t.city, fuelState: t.state, qty: t.qty,
-        truckStates: [...states], truckCities: [...new Set(cities)].slice(0, 3),
-        verdict, fuelVerdict, rise, combined });
-    }
-  }
-  return out;
 }
 
 // --- Server ---
@@ -832,19 +597,6 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=86400" });
       res.end(data);
     });
-    return;
-  }
-  // Public read-only toll report as CSV (token in the URL) — for a Google Sheets
-  // =IMPORTDATA() share so other companies can view it without a login.
-  if (req.url.startsWith("/api/toll.csv")) {
-    const key = new URL(req.url, "http://x").searchParams.get("key");
-    if (!TOLL_CSV_KEY || key !== TOLL_CSV_KEY) {
-      res.writeHead(403, { "Content-Type": "text/plain" });
-      res.end("forbidden");
-      return;
-    }
-    res.writeHead(200, { "Content-Type": "text/csv; charset=utf-8", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
-    res.end(tollToCsv(tollRows));
     return;
   }
   // Validate credentials -> set a signed HttpOnly session cookie.
@@ -936,11 +688,6 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Only the Toll board is manager-only; workers get every other feature.
-  if (/^\/api\/toll\b/.test(req.url)) {
-    if (!mgrOnly(req, res)) return;
-  }
-
   // --- Daily Pilot price: upload (parsed in-browser) + read ---
   if (req.url === "/api/fuel-price" && req.method === "GET") {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -1026,267 +773,14 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // --- Truck route check: is a route truck-restricted? (car vs hgv profile) ---
-  if (req.url === "/api/route-check" && req.method === "POST") {
-    if (!ORS_ON) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "ORS_KEY sozlanmagan (Render Environment). Truck route check uchun OpenRouteService kaliti kerak." }));
-      return;
-    }
-    const body = await readBody(req);
-    let pc;
-    if (body && body.link) {
-      const parsed = await resolveGoogleLink(body.link);
-      if (parsed && parsed.coords) {
-        // Use Google's exact pinned coordinates — no geocoding guess.
-        const c = parsed.coords;
-        const a = await orsReverse(c[0][0], c[0][1]);
-        const b = await orsReverse(c[c.length - 1][0], c[c.length - 1][1]);
-        pc = { coords: c, labels: c.map((_, i) => i === 0 ? (a || "Boshlanish") : (i === c.length - 1 ? (b || "Manzil") : "To'xtash")) };
-      } else if (parsed && parsed.names) {
-        pc = await pointsToCoords(parsed.names);
-      } else {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Google link'dan yo'nalish o'qib bo'lmadi. To'liq 'Directions' linkini (from→to) tashlang yoki From/To ni qo'lda kiriting." }));
-        return;
-      }
-    } else if (body && body.from && body.to) {
-      const via = Array.isArray(body.via) ? body.via : (body.via ? [body.via] : []);
-      pc = await pointsToCoords([body.from, ...via, body.to]);
-    } else {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "link yoki from + to kerak" }));
-      return;
-    }
-    if (pc.error) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: pc.error })); return; }
-    const car = await orsDirections("driving-car", pc.coords);
-    const hgv = await orsDirections("driving-hgv", pc.coords, true);   // want geometry for the truck route link
-    if (!car.ok && !hgv.ok) { res.writeHead(502, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: "Routing xato (ORS). Kalitni yoki manzillarni tekshiring." })); return; }
-    const carMi = car.ok ? car.meters / 1609.34 : null;
-    const truckMi = hgv.ok ? hgv.meters / 1609.34 : null;
-    let restricted = null, extraMi = null;
-    const warnings = hgv.warnings || [];
-    if (carMi != null && truckMi != null) {
-      extraMi = truckMi - carMi;
-      restricted = (truckMi / carMi > 1.08 && extraMi > 2) || warnings.length > 0;
-    } else if (!hgv.ok && car.ok) {
-      restricted = true; // truck route not found where a car route exists -> restricted
-    }
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({
-      ok: true, from: pc.labels[0], to: pc.labels[pc.labels.length - 1], stops: pc.labels,
-      carMiles: carMi != null ? +carMi.toFixed(1) : null,
-      truckMiles: truckMi != null ? +truckMi.toFixed(1) : null,
-      extraMiles: extraMi != null ? +extraMi.toFixed(1) : null,
-      restricted, warnings,
-      truckRouteUrl: hgv.ok ? sampleGoogleUrl(hgv.geom) : null,
-    }));
-    return;
-  }
-
-  // --- Reports API ---
-  const reportMatch = req.url.match(/^\/api\/reports\/([\w-]+)$/);
-  if (req.url === "/api/reports" && req.method === "GET") {
-    const list = reports.map((r) => ({
-      id: r.id, type: r.type, periodStart: r.periodStart, periodEnd: r.periodEnd,
-      createdAt: r.createdAt, unitCount: r.rows ? r.rows.length : 0, totals: r.totals || null,
-    })).sort((a, b) => (b.periodStart || "").localeCompare(a.periodStart || ""));
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(list));
-    return;
-  }
-  if (req.url === "/api/reports" && req.method === "POST") {
-    const body = await readBody(req);
-    if (!body || !Array.isArray(body.rows)) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "rows required" }));
-      return;
-    }
-    const rec = {
-      id: "r" + Date.now().toString(36),
-      type: body.type === "monthly" ? "monthly" : "weekly",
-      periodStart: body.periodStart || null,
-      periodEnd: body.periodEnd || null,
-      createdAt: new Date().toISOString(),
-      rows: body.rows,
-      unmatched: body.unmatched || [],
-      totals: body.totals || null,
-      reviews: (body.reviews && typeof body.reviews === "object") ? body.reviews : {},
-    };
-    reports.push(rec);
-    saveReports();
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, id: rec.id }));
-    return;
-  }
-  if (reportMatch && req.method === "GET") {
-    const r = reports.find((x) => x.id === reportMatch[1]);
-    res.writeHead(r ? 200 : 404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(r || { ok: false, error: "not found" }));
-    return;
-  }
-  if (reportMatch && req.method === "PUT") {
-    const body = await readBody(req);
-    const rec = reports.find((x) => x.id === reportMatch[1]);
-    if (!rec) { res.writeHead(404, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: "not found" })); return; }
-    if (body && Array.isArray(body.rows)) rec.rows = body.rows;
-    if (body && body.totals) rec.totals = body.totals;
-    rec.updatedAt = new Date().toISOString();
-    saveReports();
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, id: rec.id }));
-    return;
-  }
-  if (reportMatch && req.method === "DELETE") {
-    const i = reports.findIndex((x) => x.id === reportMatch[1]);
-    if (i >= 0) { reports.splice(i, 1); saveReports(); }
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true }));
-    return;
-  }
-  // Manual review of a low-MPG unit (checked / all-good / bad + note), persisted.
-  const reviewMatch = req.url.match(/^\/api\/reports\/([\w-]+)\/review$/);
-  if (reviewMatch && req.method === "POST") {
-    const rec = reports.find((x) => x.id === reviewMatch[1]);
-    if (!rec) { res.writeHead(404, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: "not found" })); return; }
-    const body = await readBody(req);
-    const unit = body && (body.unit || "").trim();
-    if (!unit) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: "unit kerak" })); return; }
-    rec.reviews = rec.reviews || {};
-    const status = body.status === "good" || body.status === "bad" ? body.status : null;
-    const note = (body.note || "").trim();
-    if (!status && !note) delete rec.reviews[unit];
-    else rec.reviews[unit] = { status, note };
-    saveReports();
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true }));
-    return;
-  }
-
-  if (req.url === "/api/toll" && req.method === "GET") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(tollRows));
-    return;
-  }
-  if (req.url === "/api/toll" && req.method === "POST") {
-    const body = await readBody(req);
-    if (body && Array.isArray(body.rows)) { tollRows = body.rows; saveToll(); }
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, count: tollRows.length }));
-    return;
-  }
-
-  // --- Saved toll reports (weekly/monthly snapshots) ---
-  const tollRepMatch = req.url.match(/^\/api\/toll-reports\/([\w-]+)$/);
-  if (req.url === "/api/toll-reports" && req.method === "GET") {
-    const list = tollReports.map((r) => ({ id: r.id, type: r.type, label: r.label, periodStart: r.periodStart, periodEnd: r.periodEnd, createdAt: r.createdAt, count: r.rows ? r.rows.length : 0 }))
-      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(list));
-    return;
-  }
-  if (req.url === "/api/toll-reports" && req.method === "POST") {
-    const body = await readBody(req);
-    if (!body || !Array.isArray(body.rows)) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "rows required" }));
-      return;
-    }
-    const rec = {
-      id: "t" + Date.now().toString(36),
-      type: body.type === "monthly" ? "monthly" : "weekly",
-      label: (body.label || "").trim(),
-      periodStart: body.periodStart || null,
-      periodEnd: body.periodEnd || null,
-      createdAt: new Date().toISOString(),
-      rows: body.rows,
-    };
-    tollReports.push(rec);
-    saveTollReports();
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, id: rec.id }));
-    return;
-  }
-  if (tollRepMatch && req.method === "GET") {
-    const r = tollReports.find((x) => x.id === tollRepMatch[1]);
-    res.writeHead(r ? 200 : 404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(r || { ok: false, error: "not found" }));
-    return;
-  }
-  if (tollRepMatch && req.method === "PUT") {
-    const body = await readBody(req);
-    const rec = tollReports.find((x) => x.id === tollRepMatch[1]);
-    if (!rec) { res.writeHead(404, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: "not found" })); return; }
-    if (body && Array.isArray(body.rows)) rec.rows = body.rows;
-    if (body && body.label != null) rec.label = String(body.label).trim();
-    if (body && (body.type === "weekly" || body.type === "monthly")) rec.type = body.type;
-    rec.updatedAt = new Date().toISOString();
-    saveTollReports();
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, id: rec.id }));
-    return;
-  }
-  if (tollRepMatch && req.method === "DELETE") {
-    const i = tollReports.findIndex((x) => x.id === tollRepMatch[1]);
-    if (i >= 0) { tollReports.splice(i, 1); saveTollReports(); }
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true }));
-    return;
-  }
-
-  if (req.url.startsWith("/api/perf-auto")) {
-    const q = new URL(req.url, "http://x").searchParams;
-    const start = q.get("start"), end = q.get("end");
-    if (!start || !end) { res.writeHead(400, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: "start/end required" })); return; }
-    const idleByUnit = {};
-    try {
-      let page = 1, total = Infinity;
-      while ((page - 1) * 100 < total && page <= 10) {
-        const r = await fetch(`${MOTIVE_BASE}/v1/vehicle_utilization?start_date=${encodeURIComponent(start + "T00:00:00Z")}&end_date=${encodeURIComponent(end + "T23:59:59Z")}&per_page=100&page_no=${page}`, { headers: { "X-Api-Key": API_KEY } });
-        if (!r.ok) break;
-        const j = await r.json();
-        const rolls = j.vehicle_idle_rollups || [];
-        rolls.forEach((w) => { const v = w.vehicle_idle_rollup; const num = String(v.vehicle.number).trim(); idleByUnit[num] = +(v.idle_fuel || 0).toFixed(2); });
-        total = j.pagination ? j.pagination.total : 0;
-        if (!rolls.length) break; page++;
-      }
-    } catch (e) { /* idle optional */ }
-    const units = {};
-    const all = new Set([...Object.keys(idleByUnit), ...Object.keys(odoDaily)]);
-    all.forEach((u) => { units[u] = { miles: getOdoMiles(u, start, end), idle: idleByUnit[u] != null ? idleByUnit[u] : null }; });
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, start, end, units }));
-    return;
-  }
-
-  if (req.url === "/api/fuel-check" && req.method === "POST") {
-    const body = await readBody(req);
-    if (!body || !Array.isArray(body.transactions)) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "transactions required" }));
-      return;
-    }
-    try {
-      const results = await checkTransactions(body.periodStart, body.periodEnd, body.transactions);
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, results }));
-    } catch (e) {
-      res.writeHead(502, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
-    }
-    return;
-  }
-
   serveStatic(req, res);
 });
 
 // Load durable data from the private GitHub repo on startup (overrides the
-// ephemeral local disk copy), so reports + fuel history survive any restart.
+// ephemeral local disk copy), so fuel history survives any restart.
 async function initDurable() {
   let seeded = 0;
   if (GH_ON) {
-    const r = await ghLoad("reports_data.json");
-    if (Array.isArray(r)) reports = r;
     const s = await ghLoad("fuel_series.json");
     if (s && typeof s === "object") {
       fuelSeries = s;
@@ -1302,19 +796,15 @@ async function initDurable() {
     }
     const o = await ghLoad("odo_daily.json");
     if (o && typeof o === "object") odoDaily = o;
-    const tl = await ghLoad("toll_data.json");
-    if (Array.isArray(tl)) tollRows = tl;
     const as = await ghLoad("assignments.json");
     if (as && typeof as === "object" && !Array.isArray(as)) { assignments = as; migrateAssignments(); }
     const pr = await ghLoad("prices.json");
     if (pr && pr.prices) priceData = pr;
-    const tr = await ghLoad("toll_reports_data.json");
-    if (Array.isArray(tr)) tollReports = tr;
     const un = await ghLoad("unit_notes.json");
     if (un && typeof un === "object" && !Array.isArray(un)) unitNotes = un;
     const ul = await ghLoad("unit_limits.json");
     if (ul && typeof ul === "object" && !Array.isArray(ul)) unitLimits = ul;
-    console.log(`  Durable store:       GitHub ${GH_REPO} ✓ (reports: ${reports.length})`);
+    console.log(`  Durable store:       GitHub ${GH_REPO} ✓`);
   }
   // Any unit that still has no reading at all at this point (brand new / never
   // tracked, or GH off) falls back to the static demo seed rather than showing

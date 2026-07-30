@@ -40,10 +40,6 @@
       <button class="tab active" data-view="board"><span class="tab-ic">⛽</span>Fuel board</button>
       <button class="tab" data-view="map"><span class="tab-ic">🗺️</span>Map</button>
       <button class="tab" data-view="idle"><span class="tab-ic">⏱️</span>Idle report</button>
-      <button class="tab" data-view="reports"><span class="tab-ic">📊</span>Reports</button>
-      <button class="tab" data-view="ranking"><span class="tab-ic">🏆</span>Ranking</button>
-      <button class="tab" data-view="toll"><span class="tab-ic">🛣️</span>Toll</button>
-      <button class="tab" data-view="routecheck"><span class="tab-ic">🚧</span>Route check</button>
       <button class="tab" data-view="coverage"><span class="tab-ic">📡</span>Sensor coverage</button>
     </nav>
     <div class="content-area">
@@ -142,211 +138,6 @@
     </section>
     </div>
 
-    <div id="view-reports" class="hidden">
-      <div class="rep-uploads">
-        <label class="drop" id="drop-fuel">
-          <i class="ti ti-file-spreadsheet" aria-hidden="true"></i>
-          <span class="drop-title">Fuel report (Excel)</span>
-          <span class="drop-sub" id="fuel-name">drag &amp; drop yoki bosing — RTS .xlsx</span>
-          <input type="file" id="file-fuel" accept=".xlsx,.xls" hidden />
-        </label>
-        <label class="drop" id="drop-perf">
-          <i class="ti ti-file-text" aria-hidden="true"></i>
-          <span class="drop-title">Driver Fuel Performance (CSV)</span>
-          <span class="drop-sub" id="perf-name">drag &amp; drop yoki bosing — Motive .csv (asl, Excel'da ochmagan)</span>
-          <input type="file" id="file-perf" accept=".csv" hidden />
-        </label>
-      </div>
-
-      <div class="rep-controls">
-        <label class="toggle">Davr:
-          <select id="rep-type" style="margin-left:6px">
-            <option value="weekly">Weekly</option>
-            <option value="monthly">Monthly</option>
-          </select>
-        </label>
-        <span id="rep-period" class="rep-period"></span>
-        <button class="btn" id="rep-auto" title="Driver Fuel Performance'ni Motive'dan avto olish (CSV o'rniga)">🔄 Motive'dan avto</button>
-        <button class="btn" id="rep-generate">Generate</button>
-        <button class="btn" id="rep-save" disabled>Save report</button>
-        <button class="btn" id="rep-export" disabled>Export Excel</button>
-        <button class="btn" id="rep-update" style="display:none">💾 Save changes</button>
-        <button class="btn" id="rep-delete" style="display:none">🗑 Delete report</button>
-        <select id="rep-history-select" class="rep-hsel">
-          <option value="">📁 Saqlangan reportni oching…</option>
-        </select>
-      </div>
-
-      <div id="rep-warn" class="rep-warn hidden"></div>
-      <div id="rep-unmatched" class="rep-unmatched hidden"></div>
-
-      <section class="stats" id="rep-stats" style="display:none">
-        <div class="stat-card total"><span class="stat-label">Units</span><span class="stat-value" id="rep-units">0</span></div>
-        <div class="stat-card full"><span class="stat-label">Total gallons</span><span class="stat-value" id="rep-gal">0</span></div>
-        <div class="stat-card mid"><span class="stat-label">Total cost</span><span class="stat-value" id="rep-cost">$0</span></div>
-        <div class="stat-card"><span class="stat-label">Company PPG</span><span class="stat-value" id="rep-ppg">$0</span></div>
-        <div class="stat-card"><span class="stat-label">Company MPG</span><span class="stat-value" id="rep-mpg">0</span></div>
-        <div class="stat-card"><span class="stat-label">Company CPM</span><span class="stat-value" id="rep-cpm">$0</span></div>
-        <div class="stat-card critical"><span class="stat-label">Idle gallons</span><span class="stat-value" id="rep-idle">0</span></div>
-      </section>
-
-      <div id="rep-lowmpg" class="cov-block hidden" style="margin-top:14px;border-color:var(--critical)">
-        <div class="cov-head"><h2 id="rep-lowmpg-title">Eng past MPG (&lt; 6)</h2></div>
-        <p class="cov-note">Har unit yonida <strong>Check</strong> bosing — uning fuel transaksiyalari Motive joylashuvi bilan solishtiriladi (truck o'sha fuel stop'da bo'lganmi).</p>
-        <div class="cov-grid" id="rep-lowmpg-list"></div>
-        <div id="rep-check-detail" style="margin-top:14px"></div>
-      </div>
-
-      <div class="board" style="margin-top:14px">
-        <table class="idle-table rep-sortable" id="rep-table" style="display:none">
-          <thead><tr>
-            <th data-col="unit">Unit<span class="arrow"></span></th>
-            <th data-col="qty">Qty (gal)<span class="arrow"></span></th>
-            <th data-col="amt">Amt ($)<span class="arrow"></span></th>
-            <th data-col="ppg">PPG<span class="arrow"></span></th>
-            <th data-col="miles">Miles<span class="arrow"></span></th>
-            <th data-col="mpg">MPG<span class="arrow"></span></th>
-            <th data-col="cpm">CPM<span class="arrow"></span></th>
-            <th data-col="idleGal">Idle gal<span class="arrow"></span></th>
-            <th class="rep-edit-col"></th>
-          </tr></thead>
-          <tbody id="rep-rows"></tbody>
-        </table>
-      </div>
-
-      <div class="cov-block" style="margin-top:18px">
-        <div class="cov-head"><h2>Saqlangan reportlar</h2></div>
-        <p class="cov-note">Har report sana bo'yicha saqlanadi. Ochish uchun bosing.</p>
-        <div id="rep-history"></div>
-      </div>
-    </div>
-
-    <div id="view-ranking" class="hidden">
-      <div class="rep-controls">
-        <label class="toggle">Period:
-          <select id="rank-report" class="rep-hsel" style="margin-left:6px;max-width:320px"></select>
-        </label>
-        <label class="toggle">Saralash:
-          <select id="rank-by" style="margin-left:6px">
-            <option value="mpg|-1">MPG (yaxshi → yomon)</option>
-            <option value="mpg|1">MPG (yomon → yaxshi)</option>
-            <option value="idleGal|-1">Idle gal (ko'p → kam)</option>
-            <option value="cpm|-1">CPM (qimmat → arzon)</option>
-            <option value="amt|-1">Xarajat (ko'p → kam)</option>
-            <option value="miles|-1">Miles (ko'p → kam)</option>
-          </select>
-        </label>
-        <span id="rank-period" class="rep-period"></span>
-      </div>
-      <div class="board" style="margin-top:8px">
-        <table class="idle-table rank-table" id="rank-table">
-          <thead><tr>
-            <th>#</th><th>Unit</th><th>Driver</th>
-            <th data-rcol="mpg">MPG</th>
-            <th data-rcol="idleGal">Idle gal</th>
-            <th data-rcol="cpm">CPM</th>
-            <th data-rcol="miles">Miles</th>
-            <th data-rcol="qty">Gallons</th>
-            <th data-rcol="amt">Cost</th>
-          </tr></thead>
-          <tbody id="rank-rows"></tbody>
-        </table>
-        <div id="rank-empty" class="empty hidden">Report yo'q</div>
-      </div>
-    </div>
-
-    <div id="view-toll" class="hidden">
-      <div class="rep-controls">
-        <button class="btn" id="toll-add">➕ Qator qo'shish</button>
-        <button class="btn" id="toll-save">💾 Saqlash</button>
-        <span class="toll-sep"></span>
-        <button class="btn" id="toll-xls">⬇️ Excel</button>
-        <button class="btn" id="toll-pdf">⬇️ PDF</button>
-        <button class="btn" id="toll-help-btn">ℹ️ Qanday ishlaydi</button>
-        <span class="toll-sep"></span>
-        <select id="toll-rep-type" title="Report turi">
-          <option value="weekly">Haftalik</option>
-          <option value="monthly">Oylik</option>
-        </select>
-        <input id="toll-rep-label" placeholder="Report nomi (masalan: June 2026)" style="width:190px">
-        <button class="btn" id="toll-rep-save">📅 Reportga saqlash</button>
-        <span class="toll-sep"></span>
-        <select id="toll-rep-sel" title="Saqlangan reportlar"><option value="__live">🔴 Live board</option></select>
-        <button class="btn" id="toll-rep-del" title="Tanlangan reportni o'chirish">🗑️</button>
-        <span id="toll-totals" class="rep-period"></span>
-      </div>
-
-      <div id="toll-help-panel" class="hidden toll-help">
-        <div class="toll-help-top">
-          <h3>ℹ️ Toll board — qanday ishlaydi</h3>
-          <button class="btn" id="toll-help-close">✕ Yopish</button>
-        </div>
-
-        <div class="toll-help-grid">
-          <section class="toll-help-card">
-            <h4>🛠 Tugmalar</h4>
-            <ul>
-              <li><b>➕ Qator qo'shish</b> — pastga yangi bo'sh qator qo'shadi.</li>
-              <li><b>💾 Saqlash</b> — Live board'ni saqlaydi (keyingi safar shu ma'lumot ochiladi).</li>
-              <li><b>⬇️ Excel / ⬇️ PDF</b> — jadvalni yuklab olasiz. Pastdagi TOTAL + soft saving bloki ham fayl ichiga tushadi.</li>
-              <li><b>🗑️</b> — tanlangan saqlangan reportni o'chiradi.</li>
-            </ul>
-          </section>
-
-          <section class="toll-help-card">
-            <h4>📅 Reportlar (snapshot)</h4>
-            <ul>
-              <li><b>Haftalik / Oylik</b> + nom yozib <b>📅 Reportga saqlash</b> — shu paytdagi board nusxasini saqlab qo'yadi.</li>
-              <li><b>🔴 Live board</b> dropdown'i — saqlangan reportni ochadi. U <b>faqat o'qish</b> uchun (tahrirlab bo'lmaydi), lekin Excel/PDF qilsa bo'ladi.</li>
-              <li>Live board'ga qaytish uchun dropdown'dan <b>🔴 Live board</b> ni tanlang.</li>
-            </ul>
-          </section>
-
-          <section class="toll-help-card">
-            <h4>🧮 Avtomatik ustunlar</h4>
-            <ul>
-              <li><b>Estimated difference</b> = Toll calculator − Given direction (avtomatik).</li>
-              <li><b>Extra mile</b> = Directed mile − Dispatched mile (avtomatik).</li>
-              <li>Qolgan ustunlarni o'zingiz kiritasiz.</li>
-            </ul>
-          </section>
-
-          <section class="toll-help-card">
-            <h4>🚦 Status qoidasi</h4>
-            <ul>
-              <li><b style="color:var(--full)">FOLLOWED</b> → soft saving hisoblanadi (Est diff = Toll calc − Given dir).</li>
-              <li><b style="color:var(--critical)">NOT FOLLOWED / SKIPPED</b> → Est diff avtomatik <b>$0</b> bo'ladi (haydovchi yo'nalishni bajarmagani uchun tejash yo'q).</li>
-            </ul>
-          </section>
-
-          <section class="toll-help-card wide">
-            <h4>💰 Pastdagi hisob (TOTAL + soft saving)</h4>
-            <ul>
-              <li><b>🟠 TOTAL</b> — har bir ustunning yig'indisi (qator qo'shilsa avtomatik o'sadi).</li>
-              <li><b>Extra Miles ($)</b> = jami Extra mile × <b>1.5</b> — ortiqcha millarning pul qiymati.</li>
-              <li><b>Expected soft saving</b> = jami Estimated difference − Extra Miles ($) — toll yo'llardan chetlanib tejalgan <b>sof pul</b>.</li>
-              <li><b>Expected soft saving with unfollowed</b> = soft saving − jami <b>Charge</b> (haydovchidan undirilgan summa ayriladi).</li>
-              <li>Hammasi <b>live</b> hisoblanadi — qatorni o'zgartirsangiz darrov yangilanadi.</li>
-            </ul>
-          </section>
-        </div>
-      </div>
-
-      <div class="board" style="overflow-x:auto">
-        <table class="idle-table toll-table" id="toll-table">
-          <thead><tr>
-            <th>Driver</th><th>Unit</th><th>Load ID</th><th>Date</th><th>From &gt; To</th>
-            <th>Toll calculator</th><th>Given direction</th><th>Estimated difference</th>
-            <th class="toll-status-h">Status</th>
-            <th>DH</th><th>Dispatched mile</th><th>Directed mile</th><th>Extra mile</th>
-            <th>Driven mile</th><th>Total Driven Mile</th><th>Driven toll</th><th>Charge</th><th></th>
-          </tr></thead>
-          <tbody id="toll-rows"></tbody>
-          <tfoot id="toll-foot"></tfoot>
-        </table>
-      </div>
-    </div>
-
     <div id="view-coverage" class="hidden">
       <section class="stats coverage-stats">
         <div class="stat-card full">
@@ -434,24 +225,6 @@
       </div>
     </div>
 
-    <div id="view-routecheck" class="hidden">
-      <div class="cov-block">
-        <div class="cov-head"><h2>🚧 Truck route check</h2></div>
-        <p class="cov-note">Google Maps yo'nalish linkini tashlang, yoki From/To kiriting — yo'lda <b>truck cheklovi</b> (parkway, past ko'prik, truck-taqiq) bor-yo'qligini tekshiradi. Mashina yo'li va truck yo'lini solishtiradi.</p>
-        <div class="fs-form">
-          <input id="rc-link" placeholder="Google Maps link (maps.app.goo.gl/… yoki …/maps/dir/…)" style="min-width:360px" autocomplete="off">
-          <button class="btn primary" id="rc-go">Tekshir</button>
-        </div>
-        <p class="cov-note" style="margin:8px 0 4px">— yoki manzil bilan —</p>
-        <div class="fs-form">
-          <input id="rc-from" placeholder="From (masalan: Newark, NJ)" autocomplete="off">
-          <input id="rc-via" placeholder="Via (ixtiyoriy)" autocomplete="off">
-          <input id="rc-to" placeholder="To (masalan: Boston, MA)" autocomplete="off">
-        </div>
-        <div id="rc-result"></div>
-      </div>
-    </div>
-
     </div><!-- /content-area -->
   </main>
 
@@ -474,12 +247,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
   <script src="data.js"></script>
   <script src="app.js"></script>
-  <script src="reports.js"></script>
-  <script src="toll.js"></script>
-  <script src="route-check.js"></script>
 </body>
 </html>
