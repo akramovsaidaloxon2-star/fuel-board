@@ -494,6 +494,7 @@ footer {
 .tp-row.near .fs-pill-toll { box-shadow: 0 0 0 2px rgba(124, 92, 255, .35); }
 .tp-add, .tp-clear { background: none; border: none; color: var(--text-mute); cursor: pointer;
   font-size: 13px; line-height: 1; padding: 2px 4px; border-radius: 4px; }
+.tp-sent { color: var(--full); font-weight: 700; font-size: 12px; }
 .tp-add:hover { color: #7c5cff; background: var(--row-hover); }
 .tp-clear:hover { color: var(--critical); background: var(--row-hover); }
 

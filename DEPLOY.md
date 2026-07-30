@@ -52,6 +52,27 @@ Ikkalasini ham bepul ochish mumkin.
 
 ---
 
+## 4-bosqich — toll eslatmalarini Telegramga ulash (ixtiyoriy)
+
+Toll nuqtasiga 20 mil qolganda ogohlantirish boardda chiqadi — lekin board yopiq
+bo'lsa uni hech kim ko'rmaydi. Telegram ulansa, xabar telefoningizga keladi.
+
+1. Telegramda **@BotFather** ga yozing → `/newbot` → bot nomini bering.
+   BotFather sizga **token** beradi (`123456:AA...` ko'rinishida).
+2. O'sha botni oching va unga **bitta xabar yozing** (masalan `salom`).
+   Guruhga yubormoqchi bo'lsangiz — botni guruhga qo'shing va guruhga bir xabar yozing.
+3. Render → Environment → `TELEGRAM_BOT_TOKEN` = (token) → **Save** (qayta deploy bo'ladi).
+4. Boardga kiring va brauzerda `.../api/telegram/chats` ni oching.
+   U yerda chat ro'yxati chiqadi — kerakligining **`id`** raqamini ko'chiring
+   (guruhniki manfiy bo'ladi, masalan `-1001234567890`).
+5. Render → Environment → `TELEGRAM_CHAT_ID` = (o'sha id) → **Save**.
+6. Tekshirish: `.../api/telegram/test` ni oching — Telegramga sinov xabari kelishi kerak.
+   Serverning startup log'ida ham `Toll reminder: Telegram ✓` deb yoziladi.
+
+Token yoki chat id qo'yilmasa, eslatma faqat boardda chiqadi — hech narsa buzilmaydi.
+
+---
+
 ## Muhim eslatmalar
 
 - **Bepul plan** 15 daqiqa ishlatilmasa "uxlaydi"; keyingi ochishda ~50 soniya kechikadi

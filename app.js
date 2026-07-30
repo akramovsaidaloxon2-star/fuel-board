@@ -154,9 +154,10 @@ function render() {
       const near = tp.miles != null && tp.miles <= tpRemindMi;
       const mi = tp.miles != null ? `${tp.miles} mi` : (tp.error ? "no GPS" : "…");
       const tip = esc(`${tp.label} — ${tp.miles != null ? tp.miles + " mi qoldi" : "masofa hisoblanmoqda"}`);
+      const sent = tp.remindedAt ? `<span class="tp-sent" title="Eslatma yuborilgan: ${esc(new Date(tp.remindedAt).toLocaleString())}">✓</span>` : "";
       return `<div class="fs-assigned tp-row ${near ? "near" : ""}">
           <span class="fs-pill fs-pill-toll" title="${tip}">📍 ${esc(tp.label)}</span>
-          <span class="fs-mi">${mi}</span>
+          <span class="fs-mi">${mi}</span>${sent}
           <button class="tp-clear" data-tpunit="${esc(r.unit)}" data-tpid="${esc(tp.id || "")}" title="Bu nuqtani olib tashlash">✕</button>
         </div>`;
     }).join("");

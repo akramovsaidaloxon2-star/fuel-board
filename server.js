@@ -18,7 +18,7 @@ loadEnv();
 
 const API_KEY = process.env.MOTIVE_API_KEY;
 const PORT = process.env.PORT || 3000;
-const MOTIVE_BASE = "https://api.gomotive.com";
+const MOTIVE_BASE = process.env.MOTIVE_BASE || "https://api.gomotive.com";
 
 // Login with roles. Manager = full access; worker = Fuel board / Map / Idle only.
 const AUTH_USER = process.env.AUTH_USER || "";       // legacy single login = manager
@@ -297,6 +297,25 @@ function saveTollPoints() {
 let tpBoardCache = { data: null, at: 0 };
 const TOLL_REMIND_MI = 20; // how far out the reminder fires (road miles)
 const ROUTE_NEAR_MI = 60;  // beyond this, straight-line miles are good enough
+
+// --- Telegram: the reminder has to reach dispatch with no board open ---
+const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+const TG_CHAT = process.env.TELEGRAM_CHAT_ID || "";
+const TG_API = process.env.TELEGRAM_API || "https://api.telegram.org";
+const TG_ON = !!(TG_TOKEN && TG_CHAT);
+async function tgSend(text) {
+  if (!TG_ON) return false;
+  try {
+    const r = await fetch(`${TG_API}/bot${TG_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: TG_CHAT, text, disable_web_page_preview: true }),
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!r.ok) { console.error("telegram", r.status, (await r.text()).slice(0, 160)); return false; }
+    return true;
+  } catch (e) { console.error("telegram err", e.message); return false; }
+}
 
 // Place name -> coordinates via OpenStreetMap's Nominatim (free, no API key).
 // Cached per phrase: dispatch types the same handful of exits all week, and
@@ -946,7 +965,7 @@ const server = http.createServer(async (req, res) => {
       const truck = data.fleet.find((x) => x.unit === unit);
       const out = [];
       for (const p of tollPoints[unit]) {
-        const base = { id: p.id, label: p.label, lat: p.lat, lon: p.lon, url: p.url };
+        const base = { id: p.id, label: p.label, lat: p.lat, lon: p.lon, url: p.url, remindedAt: p.remindedAt || null };
         if (!truck || truck.lat == null || truck.lon == null) {
           out.push({ ...base, miles: null, error: "no-location" });
           continue;
@@ -970,6 +989,44 @@ const server = http.createServer(async (req, res) => {
     tpBoardCache = { data: out, at: Date.now() };
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(out));
+    return;
+  }
+
+  // --- Telegram setup helpers (never return the token itself) ---
+  if (req.url === "/api/telegram/status") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, on: TG_ON, tokenSet: !!TG_TOKEN, chatSet: !!TG_CHAT }));
+    return;
+  }
+  // Finding a chat id is the fiddly part of the setup: write to the bot once,
+  // then open this and copy the id it lists into TELEGRAM_CHAT_ID.
+  if (req.url === "/api/telegram/chats") {
+    if (!TG_TOKEN) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "TELEGRAM_BOT_TOKEN sozlanmagan" }));
+      return;
+    }
+    try {
+      const r = await fetch(`${TG_API}/bot${TG_TOKEN}/getUpdates`, { signal: AbortSignal.timeout(12000) });
+      const j = await r.json();
+      const seen = new Map();
+      for (const u of (j.result || [])) {
+        const c = (u.message || u.channel_post || {}).chat;
+        if (c && !seen.has(c.id)) seen.set(c.id, { id: c.id, type: c.type, name: c.title || [c.first_name, c.last_name].filter(Boolean).join(" ") || c.username || "" });
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: !!j.ok, chats: [...seen.values()], hint: "Botga bitta xabar yozing, keyin shu sahifani yangilang." }));
+    } catch (e) {
+      res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+    }
+    return;
+  }
+  // GET too, so the setup can be finished from the browser's address bar.
+  if (req.url === "/api/telegram/test") {
+    const sent = await tgSend("✅ MOVEX fuel board — Telegram ulanishi ishlayapti. Toll eslatmalari shu yerga keladi.");
+    res.writeHead(sent ? 200 : 400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: sent, error: sent ? undefined : (TG_ON ? "Telegram javob bermadi (log'ni qarang)" : "TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID sozlanmagan") }));
     return;
   }
 
@@ -1020,12 +1077,50 @@ async function initDurable() {
   if (seeded) console.log(`  Last-known seeded:   ${seeded} units (durable series + demo seed gaps)`);
 }
 
+// Watch the toll points server-side, so the reminder goes out even when nobody
+// has the board open. The browser keeps its own toast; this drives Telegram.
+// Each point remembers when it fired (durable), so a restart neither repeats a
+// reminder nor loses one, and it re-arms only after the truck pulls well clear.
+const TOLL_WATCH_MS = Math.max(+process.env.TOLL_WATCH_MS || 60000, 5000);
+async function runTollWatch() {
+  const units = Object.keys(tollPoints);
+  if (!units.length) return;               // nothing pinned -> no Motive call
+  let data;
+  try { data = await getFuelData(); } catch { return; }
+  let changed = false;
+  for (const unit of units) {
+    const truck = data.fleet.find((x) => x.unit === unit);
+    if (!truck || truck.lat == null || truck.lon == null) continue;
+    for (const p of tollPoints[unit] || []) {
+      const air = haversineMiles(truck.lat, truck.lon, p.lat, p.lon);
+      if (air > ROUTE_NEAR_MI) {
+        if (p.remindedAt) { delete p.remindedAt; changed = true; }  // long gone
+        continue;
+      }
+      const d = await roadDistance(truck.lat, truck.lon, p.lat, p.lon);
+      const miles = Math.round(d.miles * 10) / 10;
+      if (miles <= TOLL_REMIND_MI && !p.remindedAt) {
+        p.remindedAt = new Date().toISOString();
+        changed = true;
+        const driver = truck.driver && truck.driver !== "Unassigned" ? ` (${truck.driver})` : "";
+        await tgSend(`📍 Toll eslatma\nUnit ${unit}${driver} → ${p.label}\nQolgan masofa: ${miles} mi${d.etaMin ? ` · ~${d.etaMin} daq` : ""}\n\nDriverga yo'nalishni eslating.`);
+      } else if (miles > TOLL_REMIND_MI + 10 && p.remindedAt) {
+        delete p.remindedAt;
+        changed = true;
+      }
+    }
+  }
+  if (changed) { saveTollPoints(); tpBoardCache = { data: null, at: 0 }; } // so the ✓ shows up promptly
+}
+
 server.listen(PORT, () => {
   console.log(`\n  Fuel board running:  http://localhost:${PORT}`);
   console.log(`  API endpoint:        http://localhost:${PORT}/api/fuel`);
   console.log(`  Motive key:          ${API_KEY ? "loaded ✓" : "MISSING ✗"}`);
   console.log(`  Login:               ${AUTH_ON ? `on (user: ${AUTH_USER}) ✓` : "OFF — set AUTH_USER/AUTH_PASS for cloud"}`);
   console.log(`  Stations:            Pilot ${Object.keys(brandStations.pilot).length} · Love's ${Object.keys(brandStations.loves).length} · TA/Petro ${Object.keys(brandStations.ta).length}`);
-  console.log(`  Durable store:       ${GH_ON ? "configuring…" : "OFF — set GH_TOKEN/GH_REPO for permanence"}\n`);
+  console.log(`  Durable store:       ${GH_ON ? "configuring…" : "OFF — set GH_TOKEN/GH_REPO for permanence"}`);
+  console.log(`  Toll reminder:       ${TG_ON ? `Telegram ✓ (chat ${TG_CHAT})` : "board only — set TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID for Telegram"}\n`);
   initDurable().catch((e) => console.error("initDurable", e.message));
+  setInterval(() => runTollWatch().catch((e) => console.error("tollWatch", e.message)), TOLL_WATCH_MS);
 });

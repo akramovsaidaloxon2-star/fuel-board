@@ -13,3 +13,7 @@ services:
         sync: false
       - key: AUTH_PASS
         sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
