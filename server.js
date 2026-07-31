@@ -303,8 +303,26 @@ const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TG_CHAT = process.env.TELEGRAM_CHAT_ID || "";
 const TG_API = process.env.TELEGRAM_API || "https://api.telegram.org";
 const TG_ON = !!(TG_TOKEN && TG_CHAT);
+// Telegram sends happen server-side, so when a message never arrives there is
+// nothing in the browser to inspect and the host logs are the only witness.
+// Mirror the outcome of every send — plus a boot-time getMe — into the durable
+// repo, where it can be read without shell access to the host. The token is
+// never recorded; only whether it is set and its length, which is what catches
+// a truncated or whitespace-padded value.
+const tgDiag = {
+  bootAt: new Date().toISOString(),
+  on: TG_ON,
+  tokenSet: !!TG_TOKEN,
+  tokenLen: TG_TOKEN.length,
+  chatSet: !!TG_CHAT,
+  chatId: TG_CHAT,
+  getMe: null,
+  lastSend: null,
+};
+function tgDiagSave() { ghSave("telegram_diag.json", tgDiag); }
+function tgNote(result) { tgDiag.lastSend = { at: new Date().toISOString(), ...result }; tgDiagSave(); }
 async function tgSend(text) {
-  if (!TG_ON) return false;
+  if (!TG_ON) { tgNote({ ok: false, error: "TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID sozlanmagan" }); return false; }
   try {
     const r = await fetch(`${TG_API}/bot${TG_TOKEN}/sendMessage`, {
       method: "POST",
@@ -312,9 +330,28 @@ async function tgSend(text) {
       body: JSON.stringify({ chat_id: TG_CHAT, text, disable_web_page_preview: true }),
       signal: AbortSignal.timeout(12000),
     });
-    if (!r.ok) { console.error("telegram", r.status, (await r.text()).slice(0, 160)); return false; }
+    if (!r.ok) {
+      const body = (await r.text()).slice(0, 300);
+      console.error("telegram", r.status, body);
+      tgNote({ ok: false, status: r.status, error: body });
+      return false;
+    }
+    tgNote({ ok: true });
     return true;
-  } catch (e) { console.error("telegram err", e.message); return false; }
+  } catch (e) { console.error("telegram err", e.message); tgNote({ ok: false, error: e.message }); return false; }
+}
+// Ask Telegram who we are at boot: it separates a bad token (Unauthorized)
+// from a bad chat id, which otherwise look identical from the board.
+async function tgBootCheck() {
+  if (!TG_ON) { tgDiagSave(); return; }
+  try {
+    const r = await fetch(`${TG_API}/bot${TG_TOKEN}/getMe`, { signal: AbortSignal.timeout(12000) });
+    const body = await r.json().catch(() => null);
+    tgDiag.getMe = r.ok && body && body.ok
+      ? { ok: true, username: body.result && body.result.username }
+      : { ok: false, status: r.status, error: (body && body.description) || `HTTP ${r.status}` };
+  } catch (e) { tgDiag.getMe = { ok: false, error: e.message }; }
+  tgDiagSave();
 }
 
 // Place name -> coordinates via OpenStreetMap's Nominatim (free, no API key).
@@ -995,7 +1032,7 @@ const server = http.createServer(async (req, res) => {
   // --- Telegram setup helpers (never return the token itself) ---
   if (req.url === "/api/telegram/status") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, on: TG_ON, tokenSet: !!TG_TOKEN, chatSet: !!TG_CHAT }));
+    res.end(JSON.stringify({ ok: true, on: TG_ON, tokenSet: !!TG_TOKEN, chatSet: !!TG_CHAT, diag: tgDiag }));
     return;
   }
   // Finding a chat id is the fiddly part of the setup: write to the bot once,
@@ -1126,5 +1163,7 @@ server.listen(PORT, () => {
   console.log(`  Durable store:       ${GH_ON ? "configuring…" : "OFF — set GH_TOKEN/GH_REPO for permanence"}`);
   console.log(`  Toll reminder:       ${TG_ON ? `Telegram ✓ (chat ${TG_CHAT})` : "board only — set TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID for Telegram"}\n`);
   initDurable().catch((e) => console.error("initDurable", e.message));
+  // After initDurable, so the diag write lands once the repo shas are known.
+  setTimeout(() => tgBootCheck().catch((e) => console.error("tgBootCheck", e.message)), 8000);
   setInterval(() => runTollWatch().catch((e) => console.error("tollWatch", e.message)), TOLL_WATCH_MS);
 });
