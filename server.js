@@ -320,6 +320,10 @@ const tgDiag = {
   lastSend: null,
 };
 function tgDiagSave() { ghSave("telegram_diag.json", tgDiag); }
+// Messages are sent as HTML so the unit and driver can be bolded. Anything
+// interpolated in — driver names, point labels typed by dispatch — has to be
+// escaped, or a stray "&" or "<" makes Telegram reject the whole message.
+function tgEsc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 function tgNote(result) { tgDiag.lastSend = { at: new Date().toISOString(), ...result }; tgDiagSave(); }
 async function tgSend(text) {
   if (!TG_ON) { tgNote({ ok: false, error: "TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID sozlanmagan" }); return false; }
@@ -327,7 +331,7 @@ async function tgSend(text) {
     const r = await fetch(`${TG_API}/bot${TG_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: TG_CHAT, text, disable_web_page_preview: true }),
+      body: JSON.stringify({ chat_id: TG_CHAT, text, parse_mode: "HTML", disable_web_page_preview: true }),
       signal: AbortSignal.timeout(12000),
     });
     if (!r.ok) {
@@ -1140,8 +1144,8 @@ async function runTollWatch() {
       const d = await roadDistance(truck.lat, truck.lon, p.lat, p.lon);
       const miles = Math.round(d.miles * 10) / 10;
       if (miles <= TOLL_REMIND_MI && !p.remindedAt) {
-        const driver = truck.driver && truck.driver !== "Unassigned" ? ` (${truck.driver})` : "";
-        const text = `📍 Toll eslatma\nUnit ${unit}${driver} → ${p.label}\nQolgan masofa: ${miles} mi${d.etaMin ? ` · ~${d.etaMin} daq` : ""}\n\nDriverga yo'nalishni eslating.`;
+        const driver = truck.driver && truck.driver !== "Unassigned" ? ` (${tgEsc(truck.driver)})` : "";
+        const text = `📍 <b>Toll eslatma</b>\n<b>Unit ${tgEsc(unit)}${driver}</b> → ${tgEsc(p.label)}\nQolgan masofa: <b>${miles} mi</b>${d.etaMin ? ` · ~${d.etaMin} daq` : ""}\n\nDriverga yo'nalishni eslating.`;
         // Mark it done only once Telegram has actually accepted the message —
         // otherwise a failed send would bury the reminder for good, since the
         // point never fires twice on one approach. A failure just retries next
