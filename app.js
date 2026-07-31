@@ -702,9 +702,12 @@ function setupTabs() {
       $("#view-coverage").classList.toggle("hidden", view !== "coverage");
       $("#view-idle").classList.toggle("hidden", view !== "idle");
       $("#view-map").classList.toggle("hidden", view !== "map");
+      const dirView = $("#view-directions");
+      if (dirView) dirView.classList.toggle("hidden", view !== "directions");
       if (view === "coverage") renderCoverage();
       if (view === "idle") renderIdle();
       if (view === "map") renderMap();
+      if (view === "directions" && window.initDirections) window.initDirections();
     });
   });
 }
@@ -800,9 +803,18 @@ if (priceFileInput) priceFileInput.addEventListener("change", (e) => { if (e.tar
 fetch("/api/me").then((r) => r.json()).then((j) => {
   ROLE = j.role || "manager";
   document.body.classList.toggle("role-worker", ROLE === "worker");
+  document.body.classList.toggle("role-ops", ROLE === "ops");
   if (ROLE === "worker") {
     const badge = document.querySelector(".subtitle");
     if (badge) badge.textContent = "Worker view";
+  }
+  if (ROLE === "ops") {
+    const badge = document.querySelector(".subtitle");
+    if (badge) badge.textContent = "Operations seat";
+  } else {
+    // Toll directions are still on trial: strip every trace of them from the DOM
+    // so the manager and worker boards look exactly as they did before.
+    document.querySelectorAll("#dir-banner, #view-directions, .tab.dir-only").forEach((el) => el.remove());
   }
   loadFsBoard();
   loadFuelPrice();

@@ -27,12 +27,18 @@ const MANAGER_USER = process.env.MANAGER_USER || "";
 const MANAGER_PASS = process.env.MANAGER_PASS || "";
 const WORKER_USER = process.env.WORKER_USER || "";
 const WORKER_PASS = process.env.WORKER_PASS || "";
-const AUTH_ON = !!(AUTH_USER && AUTH_PASS) || !!(MANAGER_USER && MANAGER_PASS) || !!(WORKER_USER && WORKER_PASS);
+// Operations seat: everything the manager sees, plus the toll-direction board
+// below, which is on trial and stays invisible to the manager/worker seats.
+// Leave OPS_USER/OPS_PASS unset and the whole feature is simply switched off.
+const OPS_USER = process.env.OPS_USER || "";
+const OPS_PASS = process.env.OPS_PASS || "";
+const AUTH_ON = !!(AUTH_USER && AUTH_PASS) || !!(MANAGER_USER && MANAGER_PASS) || !!(WORKER_USER && WORKER_PASS) || !!(OPS_USER && OPS_PASS);
 
 // Validate a username/password -> role (used by the login form).
 function roleFor(u, p) {
   if (MANAGER_USER && u === MANAGER_USER && p === MANAGER_PASS) return "manager";
   if (AUTH_USER && u === AUTH_USER && p === AUTH_PASS) return "manager";
+  if (OPS_USER && u === OPS_USER && p === OPS_PASS) return "ops";
   if (WORKER_USER && u === WORKER_USER && p === WORKER_PASS) return "worker";
   return null;
 }
@@ -47,7 +53,7 @@ function verifyToken(tok) {
   const [role, exp, sig] = parts;
   if (sign(role + "." + exp) !== sig) return null;
   if (Date.now() > +exp) return null;
-  if (role !== "manager" && role !== "worker") return null;
+  if (role !== "manager" && role !== "worker" && role !== "ops") return null;
   return role;
 }
 function getCookie(req, name) {
@@ -736,6 +742,198 @@ function readBody(req) {
   });
 }
 
+// --- Toll directions: nag until dispatch confirms -----------------------------
+// The toll points above remind by PLACE (truck is 20 miles out). This reminds by
+// ANSWER: a direction handed to a driver stays PENDING until somebody confirms
+// it, and keeps coming back every REMIND_EVERY_MIN minutes until they do. The
+// two cover different failure modes, so both run.
+//
+// Directions arrive from the dispatch Google Sheet (read-only -- we never write
+// back to it) or are typed in by hand. Only the operations seat can see them.
+const DIR_STORE = path.join(__dirname, "directions_data.json");
+let directions = [];
+try { directions = JSON.parse(fs.readFileSync(DIR_STORE, "utf8")); } catch { directions = []; }
+function saveDirections() {
+  fs.writeFile(DIR_STORE, JSON.stringify(directions), () => {});
+  ghSave("directions_data.json", directions);
+}
+
+const REMIND_EVERY_MIN = Math.max(1, +process.env.REMIND_EVERY_MIN || 30);
+
+// --- Google Sheet intake (read-only) ---
+// Accepts a "Publish to web -> CSV" link or a normal /edit link, which we
+// rewrite to the CSV export endpoint (that form needs link-sharing turned on).
+const SHEET_URL_RAW = (process.env.TOLL_SHEET_CSV || "").trim();
+const SHEET_POLL_MIN = Math.max(1, +process.env.SHEET_POLL_MIN || 3);
+function sheetCsvUrl(u) {
+  if (!u) return "";
+  if (/output=csv|\/export\?|\/pub\?/.test(u)) return u;            // already a CSV feed
+  const m = u.match(/\/spreadsheets\/d\/([\w-]+)/);
+  if (!m) return u;
+  const gid = (u.match(/[#&?]gid=(\d+)/) || [])[1] || "0";
+  return `https://docs.google.com/spreadsheets/d/${m[1]}/export?format=csv&gid=${gid}`;
+}
+const SHEET_CSV = sheetCsvUrl(SHEET_URL_RAW);
+const SHEET_ON = !!SHEET_CSV;
+
+// Minimal RFC4180 CSV reader (quoted cells may hold commas and newlines).
+function parseCsv(text) {
+  const rows = []; let row = [], cell = "", q = false;
+  const s = String(text || "").replace(/^﻿/, "");
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (q) {
+      if (c === '"') { if (s[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+      else cell += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(cell); cell = ""; }
+    else if (c === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; }
+    else if (c !== "\r") cell += c;
+  }
+  if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+
+// Header aliases -- dispatchers name these columns differently in every sheet,
+// so match loosely instead of demanding one exact layout.
+const DIR_ALIASES = {
+  driver: ["driver", "driver name", "drivers", "name"],
+  unit: ["unit", "unit no", "unit number", "truck", "truck no", "truck number"],
+  loadId: ["load id", "loadid", "load", "load no", "load number", "trip", "trip id", "order", "order id"],
+  route: ["from to", "route", "lane"],
+  pu: ["pu", "pickup", "pu location", "pickup location", "pu address", "origin", "pu city"],
+  puTime: ["pu time", "pu date", "pickup time", "pickup date", "pu appt", "pu appointment", "appointment"],
+  sentAt: ["date", "sent", "sent at", "given", "given at", "direction date", "time", "timestamp"],
+  direction: ["direction", "toll direction", "given direction", "instruction", "instructions", "comment", "note", "notes"],
+  status: ["status", "confirmed", "confirm", "driver confirmed"],
+};
+const normHead = (h) => String(h || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+function mapHeaders(headRow) {
+  const map = {};
+  headRow.forEach((h, i) => {
+    const n = normHead(h);
+    if (!n) return;
+    for (const field in DIR_ALIASES) {
+      if (map[field] != null) continue;
+      if (DIR_ALIASES[field].some((a) => a === n)) { map[field] = i; return; }
+    }
+  });
+  return map;
+}
+// A sheet row counts as CONFIRMED only when it says so outright.
+function statusFromSheet(v) {
+  const s = String(v || "").toLowerCase().trim();
+  if (!s) return null;
+  if (/^(confirmed|confirm|yes|ok|done|true|ha|tasdiq)/.test(s)) return "confirmed";
+  if (/^(cancel|cancelled|canceled|skip|skipped|bekor)/.test(s)) return "cancelled";
+  return "pending";
+}
+// Stable identity for a sheet row, so re-reading the sheet never duplicates a
+// direction nor resets one dispatch has already confirmed here.
+function dirKey(d) {
+  const id = String(d.loadId || "").trim().toLowerCase();
+  if (id) return "load:" + id;
+  const s = [d.driver, d.unit, d.route, d.sentAt].map((x) => String(x || "").trim().toLowerCase()).join("|");
+  return "row:" + crypto.createHash("sha1").update(s).digest("hex").slice(0, 16);
+}
+
+let sheetState = { at: 0, ok: null, error: "", rows: 0, added: 0, url: SHEET_ON };
+async function syncSheet() {
+  if (!SHEET_ON) { sheetState = { ...sheetState, ok: null, error: "TOLL_SHEET_CSV sozlanmagan" }; return sheetState; }
+  try {
+    const r = await fetch(SHEET_CSV, { redirect: "follow", signal: AbortSignal.timeout(15000) });
+    if (!r.ok) throw new Error("HTTP " + r.status + " — sheet ochiq (share/publish) ekanini tekshiring");
+    const text = await r.text();
+    if (/^\s*<(!doctype|html)/i.test(text)) throw new Error("CSV emas, HTML qaytdi — sheet ochiq emas");
+    const grid = parseCsv(text).filter((row) => row.some((c) => String(c).trim()));
+    if (!grid.length) throw new Error("Sheet bo'sh");
+    const map = mapHeaders(grid[0]);
+    if (map.driver == null && map.loadId == null && map.unit == null) {
+      throw new Error("Ustun sarlavhalari topilmadi (Driver / Unit / Load ID kerak)");
+    }
+    const cell = (row, f) => (map[f] == null ? "" : String(row[map[f]] == null ? "" : row[map[f]]).trim());
+    const byKey = new Map(directions.map((d) => [d.key, d]));
+    let added = 0, seen = 0;
+    for (let i = 1; i < grid.length; i++) {
+      const row = grid[i];
+      const rec = {
+        driver: cell(row, "driver"), unit: cell(row, "unit"), loadId: cell(row, "loadId"),
+        route: cell(row, "route"), pu: cell(row, "pu"), puTime: cell(row, "puTime"),
+        direction: cell(row, "direction"), sentAt: cell(row, "sentAt"),
+      };
+      if (!rec.driver && !rec.unit && !rec.loadId) continue;   // spacer / junk row
+      seen++;
+      const key = dirKey(rec);
+      const sheetStatus = statusFromSheet(cell(row, "status"));
+      const cur = byKey.get(key);
+      if (cur) {
+        // Refresh the descriptive fields, but never clobber a local confirmation.
+        Object.assign(cur, rec, { key });
+        if (sheetStatus === "confirmed" && cur.status === "pending") {
+          cur.status = "confirmed"; cur.confirmedAt = new Date().toISOString(); cur.confirmedBy = "sheet";
+        } else if (sheetStatus === "cancelled" && cur.status === "pending") {
+          cur.status = "cancelled";
+        }
+        continue;
+      }
+      const d = {
+        id: "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        key, ...rec,
+        source: "sheet",
+        status: sheetStatus === "confirmed" ? "confirmed" : sheetStatus === "cancelled" ? "cancelled" : "pending",
+        addedAt: new Date().toISOString(),
+        confirmedAt: sheetStatus === "confirmed" ? new Date().toISOString() : null,
+        confirmedBy: sheetStatus === "confirmed" ? "sheet" : null,
+        lastRemindAt: 0, remindCount: 0, note: "",
+      };
+      directions.push(d); byKey.set(key, d); added++;
+    }
+    if (added || seen) saveDirections();
+    sheetState = { at: Date.now(), ok: true, error: "", rows: seen, added, url: true };
+    if (added) console.log(`  Sheet sync: +${added} yangi direction (jami ${directions.length})`);
+    return sheetState;
+  } catch (e) {
+    sheetState = { at: Date.now(), ok: false, error: String(e.message || e), rows: 0, added: 0, url: true };
+    console.error("syncSheet", sheetState.error);
+    return sheetState;
+  }
+}
+
+// --- Reminder engine ---
+// The first announcement fires on the next tick after intake -- "a direction was
+// sent" is itself what arms the reminder -- then repeats until confirmed.
+const waitMin = (d) => Math.max(0, Math.round((Date.now() - new Date(d.addedAt || Date.now()).getTime()) / 60000));
+function dirTgText(d, first) {
+  const head = first ? "🛣️ <b>Yangi toll direction</b>" : `⏰ <b>Hali tasdiqlanmagan</b> (${(d.remindCount || 0) + 1}-eslatma)`;
+  const rows = [
+    ["Driver", d.driver], ["Unit", d.unit], ["Load", d.loadId],
+    ["Route", d.route], ["PU", d.pu], ["PU vaqti", d.puTime], ["Direction", d.direction],
+  ].filter(([, v]) => String(v || "").trim()).map(([k, v]) => `${k}: <b>${tgEsc(v)}</b>`);
+  return `${head}\n${rows.join("\n")}\n\n⌛ ${waitMin(d)} daqiqadan beri kutmoqda — driver confirm qilsin.`;
+}
+async function runDirectionReminders() {
+  const now = Date.now();
+  const due = [];
+  for (const d of directions) {
+    if (d.status !== "pending") continue;
+    const first = !d.lastRemindAt;
+    if (!first && now - d.lastRemindAt < REMIND_EVERY_MIN * 60000) continue;
+    due.push([d, first]);
+  }
+  if (!due.length) return;
+  let changed = false;
+  for (const [d, first] of due) {
+    // Like the toll points: only count it as reminded once Telegram accepted the
+    // message, so a failed send retries next tick instead of being swallowed.
+    const delivered = TG_ON ? await tgSend(dirTgText(d, first)) : true;
+    if (!delivered) continue;
+    d.lastRemindAt = now;
+    d.remindCount = (d.remindCount || 0) + 1;
+    changed = true;
+  }
+  if (changed) saveDirections();
+}
+
 // --- Server ---
 const server = http.createServer(async (req, res) => {
   // Public health check for uptime pingers (keeps the free instance awake).
@@ -819,6 +1017,88 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ role: req._role || "manager" }));
     return;
+  }
+
+  // --- Toll directions (trial): walled off to the operations seat, so the
+  // manager and worker boards behave exactly as they did before this shipped. ---
+  if (/^\/api\/directions\b/.test(req.url)) {
+    if (req._role !== "ops") {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "forbidden" }));
+      return;
+    }
+    const dirMatch = req.url.match(/^\/api\/directions\/([\w-]+)$/);
+    const dirJson = (code, obj) => { res.writeHead(code, { "Content-Type": "application/json" }); res.end(JSON.stringify(obj)); };
+
+    // Lightweight poll for the banner/badge: just the pending ones + config state.
+    if (req.url === "/api/directions/alerts" && req.method === "GET") {
+      const pending = directions.filter((d) => d.status === "pending")
+        .map((d) => ({ id: d.id, driver: d.driver, unit: d.unit, loadId: d.loadId, route: d.route, pu: d.pu, puTime: d.puTime, waitMin: waitMin(d), remindCount: d.remindCount || 0 }))
+        .sort((a, b) => b.waitMin - a.waitMin);
+      dirJson(200, { pending, count: pending.length, everyMin: REMIND_EVERY_MIN, telegram: TG_ON, sheet: sheetState });
+      return;
+    }
+    if (req.url === "/api/directions/sync" && req.method === "POST") {
+      const st = await syncSheet();
+      dirJson(200, { ...st, ok: st.ok === true });
+      return;
+    }
+    if (req.url === "/api/directions" && req.method === "GET") {
+      const list = directions.slice().sort((a, b) => {
+        if ((a.status === "pending") !== (b.status === "pending")) return a.status === "pending" ? -1 : 1;
+        return String(b.addedAt || "").localeCompare(String(a.addedAt || ""));
+      }).map((d) => ({ ...d, waitMin: waitMin(d) }));
+      dirJson(200, { rows: list, everyMin: REMIND_EVERY_MIN, telegram: TG_ON, sheet: sheetState });
+      return;
+    }
+    // Manual entry, for directions given outside the sheet.
+    if (req.url === "/api/directions" && req.method === "POST") {
+      const b = await readBody(req);
+      if (!b || (!String(b.driver || "").trim() && !String(b.unit || "").trim() && !String(b.loadId || "").trim())) {
+        dirJson(400, { ok: false, error: "Driver, Unit yoki Load ID dan kamida bittasi kerak" });
+        return;
+      }
+      const rec = {
+        driver: String(b.driver || "").trim(), unit: String(b.unit || "").trim(), loadId: String(b.loadId || "").trim(),
+        route: String(b.route || "").trim(), pu: String(b.pu || "").trim(), puTime: String(b.puTime || "").trim(),
+        direction: String(b.direction || "").trim(), sentAt: String(b.sentAt || "").trim(),
+      };
+      const key = dirKey(rec);
+      if (directions.some((d) => d.key === key)) { dirJson(409, { ok: false, error: "Bu direction allaqachon bor" }); return; }
+      const d = {
+        id: "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        key, ...rec, source: "manual", status: "pending",
+        addedAt: new Date().toISOString(), confirmedAt: null, confirmedBy: null,
+        lastRemindAt: 0, remindCount: 0, note: String(b.note || "").trim(),
+      };
+      directions.push(d);
+      saveDirections();
+      runDirectionReminders().catch(() => {});          // announce it right away
+      dirJson(200, { ok: true, id: d.id });
+      return;
+    }
+    // Confirm / cancel / re-open / annotate one direction.
+    if (dirMatch && req.method === "PUT") {
+      const b = await readBody(req) || {};
+      const d = directions.find((x) => x.id === dirMatch[1]);
+      if (!d) { dirJson(404, { ok: false, error: "not found" }); return; }
+      if (b.status === "confirmed" || b.status === "cancelled" || b.status === "pending") {
+        d.status = b.status;
+        if (b.status === "confirmed") { d.confirmedAt = new Date().toISOString(); d.confirmedBy = "board"; }
+        else { d.confirmedAt = null; d.confirmedBy = null; }
+        if (b.status === "pending") { d.lastRemindAt = 0; d.remindCount = 0; }   // re-arm the nag
+      }
+      if (b.note != null) d.note = String(b.note).trim();
+      saveDirections();
+      dirJson(200, { ok: true });
+      return;
+    }
+    if (dirMatch && req.method === "DELETE") {
+      const i = directions.findIndex((x) => x.id === dirMatch[1]);
+      if (i >= 0) { directions.splice(i, 1); saveDirections(); }
+      dirJson(200, { ok: true });
+      return;
+    }
   }
   // Per-unit note (driver quirks). Any signed-in user can read/set.
   if (req.url === "/api/unit-note" && req.method === "POST") {
@@ -1107,6 +1387,8 @@ async function initDurable() {
     if (un && typeof un === "object" && !Array.isArray(un)) unitNotes = un;
     const ul = await ghLoad("unit_limits.json");
     if (ul && typeof ul === "object" && !Array.isArray(ul)) unitLimits = ul;
+    const dr = await ghLoad("directions_data.json");
+    if (Array.isArray(dr)) directions = dr;
     console.log(`  Durable store:       GitHub ${GH_REPO} ✓`);
   }
   // Any unit that still has no reading at all at this point (brand new / never
@@ -1168,8 +1450,17 @@ server.listen(PORT, () => {
   console.log(`  Login:               ${AUTH_ON ? `on (user: ${AUTH_USER}) ✓` : "OFF — set AUTH_USER/AUTH_PASS for cloud"}`);
   console.log(`  Stations:            Pilot ${Object.keys(brandStations.pilot).length} · Love's ${Object.keys(brandStations.loves).length} · TA/Petro ${Object.keys(brandStations.ta).length}`);
   console.log(`  Durable store:       ${GH_ON ? "configuring…" : "OFF — set GH_TOKEN/GH_REPO for permanence"}`);
-  console.log(`  Toll reminder:       ${TG_ON ? `Telegram ✓ (chat ${TG_CHAT})` : "board only — set TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID for Telegram"}\n`);
-  initDurable().catch((e) => console.error("initDurable", e.message));
+  console.log(`  Toll reminder:       ${TG_ON ? `Telegram ✓ (chat ${TG_CHAT})` : "board only — set TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID for Telegram"}`);
+  console.log(`  Ops seat:            ${OPS_USER && OPS_PASS ? `on (user: ${OPS_USER}) ✓` : "OFF — set OPS_USER/OPS_PASS to enable toll directions"}`);
+  console.log(`  Toll directions:     ${SHEET_ON ? `sheet har ${SHEET_POLL_MIN} daq · eslatma har ${REMIND_EVERY_MIN} daq ✓` : "OFF — set TOLL_SHEET_CSV"}\n`);
+  initDurable()
+    .catch((e) => console.error("initDurable", e.message))
+    .then(() => {
+      // Poll only after initDurable, or a fresh sheet read could re-add rows
+      // already confirmed in the durable repo.
+      if (SHEET_ON) { syncSheet().catch(() => {}); setInterval(() => syncSheet().catch(() => {}), SHEET_POLL_MIN * 60000); }
+      setInterval(() => runDirectionReminders().catch((e) => console.error("dirRemind", e.message)), 60000);
+    });
   // After initDurable, so the diag write lands once the repo shas are known.
   setTimeout(() => tgBootCheck().catch((e) => console.error("tgBootCheck", e.message)), 8000);
   setInterval(() => runTollWatch().catch((e) => console.error("tollWatch", e.message)), TOLL_WATCH_MS);

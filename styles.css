@@ -535,3 +535,86 @@ footer {
 /* Pilot daily price upload bar */
 .price-bar { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; }
 .price-label { color: var(--text-dim); font-size: 13px; }
+
+/* ============================================================
+   Toll directions (operations seat) — banner, tab badge, panel
+   ============================================================ */
+
+/* Unread count on the Directions tab, visible from every other tab */
+.tab-badge {
+  margin-left: auto;
+  min-width: 20px; height: 20px; padding: 0 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--critical); color: #fff;
+  border-radius: 10px; font-size: 11px; font-weight: 700;
+  animation: dir-pulse 1.8s ease-in-out infinite;
+}
+@keyframes dir-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(226, 75, 74, 0.55); }
+  50%      { box-shadow: 0 0 0 6px rgba(226, 75, 74, 0); }
+}
+
+/* Sticky nag bar shown above whichever view is open */
+.dir-banner {
+  display: flex; align-items: center; gap: 12px;
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--critical);
+  border-left: 4px solid var(--critical);
+  border-radius: 10px;
+  background: rgba(226, 75, 74, 0.10);
+}
+.dir-banner-ic { font-size: 20px; line-height: 1; }
+.dir-banner-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.dir-banner-txt strong { color: var(--text); font-size: 14px; }
+.dir-banner-txt span { color: var(--text-dim); font-size: 12.5px; }
+.dir-banner .btn { flex-shrink: 0; }
+
+.dir-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 14px 16px 10px;
+  margin: 0 0 18px;
+}
+.dir-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.dir-head h3 { margin: 0; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+.dir-count {
+  min-width: 22px; padding: 1px 7px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+  font-size: 12px; color: var(--text-dim); text-align: center;
+}
+.dir-state { color: var(--text-mute); font-size: 12px; }
+.dir-state.bad { color: var(--critical); }
+.dir-sep { display: inline-block; width: 1px; height: 22px; background: var(--border); margin: 0 3px; }
+.dir-toggle { margin-left: auto; font-size: 12.5px; }
+
+.dir-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
+.dir-form input {
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 7px; padding: 7px 10px; font-size: 13px;
+}
+.dir-form input:focus { outline: none; border-color: var(--accent); }
+.dir-form .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+.dir-list-wrap { overflow-x: auto; }
+.dir-table { width: 100%; font-size: 13px; }
+.dir-table td { border: 1px solid var(--border); padding: 6px 8px; vertical-align: middle; }
+.dir-table tbody tr.dir-pending td { background: rgba(226, 75, 74, 0.07); }
+.dir-table .dir-dir { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dir-acts { white-space: nowrap; display: flex; gap: 4px; }
+
+.btn.sm { padding: 4px 8px; font-size: 12px; border-radius: 6px; }
+.btn.sm.ok { background: var(--full); border-color: var(--full); color: #fff; font-weight: 600; }
+
+.dir-chip {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 11.5px; font-weight: 600; white-space: nowrap;
+}
+.dir-chip.pend { background: rgba(226, 75, 74, 0.16); color: var(--critical); }
+.dir-chip.ok   { background: rgba(43, 182, 115, 0.16); color: var(--full); }
+.dir-chip.off  { background: rgba(127, 127, 127, 0.16); color: var(--text-mute); }
+
+/* .hidden is declared earlier in this file, so the flex displays above would win
+   on equal specificity — re-assert it for the elements that start out hidden. */
+.dir-banner.hidden, .tab-badge.hidden, .dir-form.hidden, #view-directions.hidden { display: none; }

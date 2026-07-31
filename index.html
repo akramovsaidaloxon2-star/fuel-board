@@ -42,8 +42,20 @@
       <button class="tab" data-view="map"><span class="tab-ic">🗺️</span>Map</button>
       <button class="tab" data-view="idle"><span class="tab-ic">⏱️</span>Idle report</button>
       <button class="tab" data-view="coverage"><span class="tab-ic">📡</span>Sensor coverage</button>
+      <button class="tab dir-only" data-view="directions"><span class="tab-ic">🛣️</span>Directions<span id="dir-badge" class="tab-badge hidden">0</span></button>
     </nav>
     <div class="content-area">
+
+    <!-- Nags from any tab while a toll direction is still unconfirmed. -->
+    <div id="dir-banner" class="dir-banner hidden">
+      <span class="dir-banner-ic">🛣️</span>
+      <div class="dir-banner-txt">
+        <strong id="dir-banner-title">Tasdiqlanmagan direction</strong>
+        <span id="dir-banner-sub"></span>
+      </div>
+      <button class="btn" id="dir-banner-go">Ko'rish →</button>
+      <button class="btn icon-btn" id="dir-banner-mute" title="Ovozni o'chirish / yoqish">🔔</button>
+    </div>
 
     <div id="view-board">
     <section class="stats">
@@ -227,6 +239,51 @@
       </div>
     </div>
 
+    <!-- Toll directions: pulled from the dispatch sheet, nagged until confirmed -->
+    <div id="view-directions" class="hidden">
+      <section class="dir-panel">
+        <div class="dir-head">
+          <h3>🛣️ Berilgan directionlar <span id="dir-count" class="dir-count">0</span></h3>
+          <span id="dir-state" class="dir-state"></span>
+          <span class="dir-sep"></span>
+          <button class="btn" id="dir-sync">🔄 Sheet'dan yangilash</button>
+          <button class="btn" id="dir-new">➕ Qo'lda qo'shish</button>
+          <label class="toggle dir-toggle"><input type="checkbox" id="dir-show-done"> Tasdiqlanganlarni ham ko'rsatish</label>
+        </div>
+
+        <form id="dir-form" class="dir-form hidden">
+          <input id="dir-f-driver" placeholder="Driver" style="width:170px">
+          <input id="dir-f-unit" placeholder="Unit" style="width:70px">
+          <input id="dir-f-load" placeholder="Load ID" style="width:110px">
+          <input id="dir-f-route" placeholder="From > To" style="width:130px">
+          <input id="dir-f-pu" placeholder="PU (joy)" style="width:150px">
+          <input id="dir-f-putime" placeholder="PU vaqti" style="width:120px">
+          <input id="dir-f-dir" placeholder="Direction / izoh" style="width:200px">
+          <button class="btn primary" type="submit">Qo'shish</button>
+          <button class="btn" type="button" id="dir-f-cancel">Bekor</button>
+        </form>
+
+        <div class="dir-list-wrap">
+          <table class="idle-table dir-table" id="dir-table">
+            <thead><tr>
+              <th>Holat</th><th>Driver</th><th>Unit</th><th>Load ID</th><th>From &gt; To</th>
+              <th>PU</th><th>PU vaqti</th><th>Direction</th><th>Kutmoqda</th><th>Eslatma</th><th></th>
+            </tr></thead>
+            <tbody id="dir-rows"></tbody>
+          </table>
+          <div id="dir-empty" class="empty hidden">Direction yo'q</div>
+        </div>
+      </section>
+
+      <section class="info-card">
+        <div class="info-icon">i</div>
+        <div>
+          <strong>Qanday ishlaydi</strong>
+          <p>Dispatch Google Sheet'idagi yangi qatorlar avtomatik shu ro'yxatga tushadi — sheet <strong>faqat o'qiladi</strong>, hech narsa yozilmaydi. Har bir direction <strong>⏳ Kutilmoqda</strong> holatida turadi va tasdiqlanmaguncha eslatib turadi: sahifada banner va ovoz, Telegram'ga esa belgilangan oraliqda qayta xabar. Driver tasdiqlagach <strong>✓ Confirm</strong> bosiladi va eslatma to'xtaydi. Bu <strong>Fuel board'dagi 📍 toll nuqtasi</strong> eslatmasidan farq qiladi: u <em>joyga</em> qarab (20 mil qolganda), bu esa <em>javobga</em> qarab ishlaydi.</p>
+        </div>
+      </section>
+    </div>
+
     </div><!-- /content-area -->
   </main>
 
@@ -251,5 +308,6 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="data.js"></script>
   <script src="app.js"></script>
+  <script src="directions.js"></script>
 </body>
 </html>
