@@ -1063,7 +1063,10 @@ const server = http.createServer(async (req, res) => {
   if (req.url === "/api/telegram/test") {
     const sent = await tgSend("✅ MOVEX fuel board — Telegram ulanishi ishlayapti. Toll eslatmalari shu yerga keladi.");
     res.writeHead(sent ? 200 : 400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: sent, error: sent ? undefined : (TG_ON ? "Telegram javob bermadi (log'ni qarang)" : "TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID sozlanmagan") }));
+    // Hand back what Telegram actually said — "didn't work" is not something
+    // the operator can act on, "chat not found" is.
+    const why = (tgDiag.lastSend && tgDiag.lastSend.error) || "Telegram javob bermadi";
+    res.end(JSON.stringify({ ok: sent, error: sent ? undefined : why }));
     return;
   }
 

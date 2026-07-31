@@ -759,6 +759,26 @@ applyTheme((() => { try { return localStorage.getItem("fuelboard-theme") || "dar
 
 $("#refresh").addEventListener("click", loadData);
 
+// Toll reminders are sent by the server, so a silent Telegram looks identical
+// to a healthy board. This sends one real message on demand and reports back
+// what Telegram said, which is the only way to confirm delivery from here.
+const tgTestBtn = $("#tg-test");
+if (tgTestBtn) tgTestBtn.addEventListener("click", async () => {
+  tgTestBtn.disabled = true;
+  const label = tgTestBtn.textContent;
+  tgTestBtn.textContent = "✈ Yuborilyapti...";
+  try {
+    const r = await fetch("/api/telegram/test", { method: "POST" });
+    const j = await r.json();
+    showToast(j.ok ? "✅ Telegramga yuborildi — botni tekshiring" : `❌ ${j.error || "yuborilmadi"}`);
+  } catch (e) {
+    showToast(`❌ Server javob bermadi: ${e.message}`);
+  } finally {
+    tgTestBtn.disabled = false;
+    tgTestBtn.textContent = label;
+  }
+});
+
 const logoutBtn = $("#logout");
 if (logoutBtn) logoutBtn.addEventListener("click", async () => {
   try { await fetch("/api/logout", { method: "POST" }); } catch {}
