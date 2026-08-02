@@ -316,6 +316,10 @@ const TG_ON = !!(TG_TOKEN && TG_CHAT);
 // a truncated or whitespace-padded value.
 const tgDiag = {
   bootAt: new Date().toISOString(),
+  // Which build is actually serving. Without it, "the page still looks old" is
+  // a guess between a deploy that hasn't finished and a browser holding a stale
+  // copy; Render puts the deployed commit in the environment.
+  commit: (process.env.RENDER_GIT_COMMIT || "").slice(0, 7),
   on: TG_ON,
   tokenSet: !!TG_TOKEN,
   tokenLen: TG_TOKEN.length,
