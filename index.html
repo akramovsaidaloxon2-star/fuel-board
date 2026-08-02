@@ -229,20 +229,24 @@
       </div>
     </div>
 
-    <!-- Toll directions: pulled from the dispatch sheet, nagged until confirmed -->
     <div id="view-directions" class="hidden">
       <section class="dir-panel">
         <div class="dir-head">
           <h3>🛣️ Yo'nalish yozish</h3>
         </div>
 
-        <!-- Paste a Maps link, get the written note. That is the whole feature. -->
+        <!-- Google's own step list is the faithful source: it is what the driver
+             will read. The link stays as the fallback when there is nothing to
+             paste, and is routed here instead. -->
         <div class="dir-draft">
-          <input id="dir-link" placeholder="Google Maps link — yo'nalishni shu yerga qo'ying" autocomplete="off">
+          <textarea id="dir-text" rows="6" spellcheck="false"
+            placeholder="Google Maps → Details → yo'nalish ro'yxatini nusxalab shu yerga qo'ying (eng aniq yo'li)"></textarea>
+          <input id="dir-link" placeholder="…yoki shunchaki Google Maps linki" autocomplete="off">
           <button class="btn primary" type="button" id="dir-draft-go">🛣️ Yozib ber</button>
           <button class="btn" type="button" id="dir-draft-copy" hidden>📋 Nusxa</button>
+          <button class="btn" type="button" id="dir-draft-clear" hidden>✕ Tozalash</button>
           <span id="dir-draft-state" class="dir-draft-state"></span>
-          <textarea id="dir-draft-out" rows="16" spellcheck="false" hidden></textarea>
+          <textarea id="dir-draft-out" rows="14" spellcheck="false" hidden></textarea>
         </div>
       </section>
 
@@ -250,7 +254,8 @@
         <div class="info-icon">i</div>
         <div>
           <strong>Qanday ishlaydi</strong>
-          <p>Google Maps yo'nalish linkini qo'ying — qaysi interstate'dan qaysi <strong>Exit</strong> orqali qaysisiga o'tilishi qatorma-qator yozib beriladi, oxirida yo'l uzunligi bilan. Matnni tahrirlab, nusxa olib driverga yuborasiz. <strong>Diqqat:</strong> yo'nalish yengil mashina uchun hisoblanadi — past ko'prik, og'irlik cheklovi va truck taqiqlarini bilmaydi, shuning uchun yuborishdan oldin ko'zdan kechiring.</p>
+          <p><strong>Eng aniq yo'li:</strong> Google Maps'da yo'nalishni oching → <strong>Details</strong> → butun ro'yxatni nusxalab yuqoridagi katta qutiga qo'ying. Bunda hech narsa qaytadan hisoblanmaydi — qaysi <strong>Exit</strong>, qaysi yo'l va "I-81 S" degani Google'dan aynan olinadi, ya'ni driver ko'radigan narsaning o'zi.</p>
+          <p>Matn bo'lmasa, faqat linkni qo'ysangiz ham bo'ladi — u holda yo'nalish shu yerda hisoblanadi. Bu tezroq, lekin <strong>yengil mashina uchun</strong> hisoblanadi: past ko'prik, og'irlik cheklovi va truck taqiqlarini bilmaydi, hamda Google tanlagan yo'ldan farq qilishi mumkin. Har ikki holda ham yuborishdan oldin ko'zdan kechiring.</p>
         </div>
       </section>
     </div>

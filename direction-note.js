@@ -232,6 +232,91 @@ function isRoad(label) {
   return !!label && /^[A-Za-z]{1,3}\s?-?\d/.test(String(label.ref || "").trim());
 }
 
+// --- Google's own directions, pasted in ------------------------------------
+// The most faithful source there is: it is the text the driver will be looking
+// at, exit numbers and "I-81 S" included. Nothing is computed, only reshaped,
+// so a route this can't fully parse loses lines rather than inventing them.
+const DIR_LETTER = { N: "North", S: "South", E: "East", W: "West" };
+
+// "I-90 W", "I 90", "PA-934 S", "US-322 E", "State Rd 934 S", "I-380 N/I-84".
+const ROAD_RE = /\b(?:State (?:Rd|Route|Hwy)|[A-Z]{1,3})[- ]?(\d{1,3}[A-Za-z]?)\b(?:\s*([NSEW])\b|\s+(North|South|East|West)\b)?/;
+
+function readRoad(text) {
+  const s = String(text || "");
+  const m = ROAD_RE.exec(s);
+  if (!m) return null;
+  const head = s.slice(m.index).match(/^(State (?:Rd|Route|Hwy)|[A-Z]{1,3})/);
+  const prefix = head ? (head[1].startsWith("State") ? "SR" : head[1]) : "";
+  if (!prefix) return null;
+  const dir = m[2] ? DIR_LETTER[m[2].toUpperCase()] : (m[3] ? m[3] : "");
+  return { ref: `${prefix} ${m[1]}`, dir };
+}
+
+// Steps name the road being joined after one of these; "toward" is followed by
+// a city, so it is deliberately not in the list.
+const TARGET_AFTER = /\b(?:onto|for|stay on|get on|take|to)\b\s+(.*)$/i;
+
+// Lines that carry no instruction: distances, durations, road-type notes, the
+// state-line callouts, and the destination address.
+function isNoiseLine(l) {
+  return /^\d+(\.\d+)?\s*(mi|ft|km|m)$/i.test(l)
+    || /^(about\s+)?\d+\s*(hr|h|min)\b/i.test(l)
+    || /^(toll road|partial toll road|entering|passing through|restricted usage road|ferry|escalator)/i.test(l)
+    || /\b[A-Z]{2}\s+\d{5}(-\d{4})?\b/.test(l)
+    || /^(destination|your destination)/i.test(l);
+}
+
+function parseGoogleText(text) {
+  const out = [];
+  let current = null, pendingExit = "", miles = 0, steps = 0;
+
+  for (const rawLine of String(text || "").split(/\r?\n/)) {
+    const l = rawLine.trim();
+    if (!l) continue;
+
+    const dist = l.match(/^(\d+(?:\.\d+)?)\s*(mi|ft)$/i);
+    if (dist) {
+      miles += dist[2].toLowerCase() === "ft" ? +dist[1] / 5280 : +dist[1];
+      steps++;
+      continue;
+    }
+    if (isNoiseLine(l)) continue;
+
+    const exit = (l.match(/\bexit\s+(\d+[A-Za-z]?)\b/i) || [])[1] || "";
+
+    // "Follow I-90 W and I-84 to I-81 S in Wilkes-Barre Township. Take exit 85
+    // from I-81 S" is a section heading listing roads still to come — taking
+    // roads from it would emit turns that never happen. Its exit number is
+    // real, though, and belongs to the turn described further down.
+    if (/^follow\b/i.test(l)) { if (exit) pendingExit = exit; continue; }
+
+    const after = (l.match(TARGET_AFTER) || [])[1];
+    // A road named after "onto"/"for" is the one being joined; failing that,
+    // any road on the line ("Merge onto I-90 W" vs "Continue on I-84").
+    const road = readRoad(after || "") || readRoad(l);
+    if (!road) { if (exit) pendingExit = exit; continue; }
+
+    if (!current) { current = road; continue; }
+
+    // "Keep right to stay on I-84" is not a turn; it may still be the first
+    // place the compass half is spelled out.
+    if (/\bstay on\b/i.test(l) || road.ref === current.ref) {
+      if (road.ref === current.ref && road.dir && !current.dir) current = road;
+      continue;
+    }
+
+    const useExit = exit || pendingExit;
+    pendingExit = "";
+    out.push(useExit
+      ? `${labelText(current)} > Exit ${useExit} > ${labelText(road)}`
+      : `${labelText(current)} > ${labelText(road)}`);
+    current = road;
+  }
+  // Only trust the distance when the paste actually carried per-step mileage;
+  // a summary-only paste would undercount badly and quietly.
+  return { lines: out, miles: steps >= 3 ? Math.round(miles) : null };
+}
+
 // --- The note itself --------------------------------------------------------
 function formatMiles(mi) {
   return Number.isFinite(mi) ? (Math.round(mi * 100) / 100).toString() : "";
@@ -251,6 +336,8 @@ function buildNote({ lines, dhMiles, routeMiles, dispatchedMiles }) {
 module.exports = {
   parseMapsPoints,
   parseDataWaypoints,
+  parseGoogleText,
+  readRoad,
   directionLines,
   buildNote,
   cardinal,

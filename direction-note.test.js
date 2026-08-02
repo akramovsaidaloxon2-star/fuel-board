@@ -78,5 +78,92 @@ console.log(note.split("\n").map(l => "   | " + l).join("\n"));
 if (!/DH: 96\.71/.test(note) || !/Loaded miles with direction: 3127/.test(note)) { fail++; console.log("  ✗ millar noto'g'ri"); }
 else console.log("  ✓ millar joyida");
 
+
+console.log("\n=== 7. Google matnidan (haqiqiy nusxa)");
+const google = `Get on I-90 W from Brookline Ave and Commonwealth Ave
+6 min (0.8 mi)
+
+
+Follow I-90 W and I-84 to I-81 S in Wilkes-Barre Township
+4 hr 41 min (303 mi)
+
+Merge onto I-90 W
+ Toll road
+
+53.8 mi
+
+Use the right 2 lanes to take exit 78 for I-84 toward Hartford Connecticut/N.Y.City
+ Toll road
+
+0.7 mi
+
+Continue onto I-84
+ Toll road
+ Entering Connecticut
+
+40.9 mi
+
+Keep right to stay on I-84, follow signs for I-91 N/Hartford
+
+1.2 mi
+
+Keep right to stay on I-84
+
+13.8 mi
+
+Keep left to stay on I-84, follow signs for Waterbury
+
+17.1 mi
+
+Keep right to stay on I-84
+
+28.6 mi
+
+Keep right to stay on I-84, follow signs for Newburgh
+ Passing through New York
+ Entering Pennsylvania
+
+125 mi
+
+Keep right to stay on I-84
+
+0.7 mi
+
+Merge onto I-380 N/I-84
+
+3.3 mi
+
+Use the left 2 lanes to merge onto I-81 S toward Wilkes-Barre
+
+18.5 mi
+4 hr 47 min (304 mi)
+65 Northampton Ct
+Wilkes-Barre Township, PA 18702, USA
+
+
+Follow I-81 S to State Rd 934 S in Fort Indiantown Gap. Take exit 85 from I-81 S
+1 hr 15 min (83.5 mi)
+
+
+Take PA-934 S, PA-241 S/Mt Wilson Rd, Meadow View Rd and Milton Grove Rd to New Haven St in Mount Joy`;
+
+const g = d.parseGoogleText(google);
+console.log(g.lines.map(l => "   | " + l).join("\n"));
+console.log("   | jami:", g.miles, "mi");
+eq(g.lines, [
+  "I 90 West > Exit 78 > I 84",
+  "I 84 > I 380 North",
+  "I 380 North > I 81 South",
+  "I 81 South > Exit 85 > PA 934 South",
+], "Google matni aynan o'giriladi");
+eq(g.miles, 304, "qadamlardagi millar yig'indisi");
+
+console.log("\n=== 8. Yo'l nomini o'qish");
+eq(d.readRoad("I-90 W"), { ref: "I 90", dir: "West" }, "I-90 W");
+eq(d.readRoad("PA-934 S"), { ref: "PA 934", dir: "South" }, "PA-934 S");
+eq(d.readRoad("I-81 South, Wilkes-Barre"), { ref: "I 81", dir: "South" }, "to'liq so'z bilan");
+eq(d.readRoad("State Rd 934 S"), { ref: "SR 934", dir: "South" }, "State Rd -> SR");
+eq(d.readRoad("Brookline Ave"), null, "oddiy ko'cha — yo'l emas");
+
 console.log(fail ? `\n${fail} ta xato` : "\nHammasi o'tdi");
 process.exit(fail ? 1 : 0);

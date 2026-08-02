@@ -459,9 +459,28 @@ async function directionRoute(coords) {
   for (const leg of route.legs || []) for (const s of leg.steps || []) steps.push(s);
   return { miles: route.distance / 1609.34, steps };
 }
-async function buildDirectionNote({ url, unit, dispatchedMiles }) {
+async function buildDirectionNote({ url, text, unit, dispatchedMiles }) {
+  const dispatchedNum = Number(dispatchedMiles);
+  const dispatched = Number.isFinite(dispatchedNum) && dispatchedNum > 0 ? dispatchedNum : undefined;
+  // Google's own directions, pasted from the Details panel. Nothing is routed:
+  // the roads, exits and compass halves are the ones the driver will read, so
+  // this is preferred over anything computed here.
+  const pasted = String(text || "").trim();
+  if (pasted) {
+    const g = dirs.parseGoogleText(pasted);
+    if (!g.lines.length) return { ok: false, error: "matndan yo'nalish topilmadi — Google'dagi \"Details\" ro'yxatini to'liq nusxalang" };
+    return {
+      ok: true,
+      note: dirs.buildNote({ lines: g.lines, routeMiles: g.miles == null ? undefined : g.miles, dispatchedMiles: dispatched }),
+      lines: g.lines,
+      stops: null,
+      miles: g.miles,
+      dh: null,
+      source: "google",
+    };
+  }
   const link = String(url || "").trim();
-  if (!link) return { ok: false, error: "link kiritilmagan" };
+  if (!link) return { ok: false, error: "link yoki matn kiritilmagan" };
   // Short share links carry nothing until they redirect.
   let expanded = link;
   if (/goo\.gl/.test(link)) {
@@ -498,19 +517,14 @@ async function buildDirectionNote({ url, unit, dispatchedMiles }) {
     } catch { /* DH is optional — the note is still worth sending without it */ }
   }
   const lines = dirs.directionLines(route.steps);
-  const dispatched = Number(dispatchedMiles);
   return {
     ok: true,
-    note: dirs.buildNote({
-      lines,
-      dhMiles,
-      routeMiles: route.miles,
-      dispatchedMiles: Number.isFinite(dispatched) && dispatched > 0 ? dispatched : undefined,
-    }),
+    note: dirs.buildNote({ lines, dhMiles, routeMiles: route.miles, dispatchedMiles: dispatched }),
     lines,
     stops: coords.length,
     miles: Math.round(route.miles),
     dh: Number.isFinite(dhMiles) ? Math.round(dhMiles * 100) / 100 : null,
+    source: "route",
   };
 }
 
