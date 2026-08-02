@@ -2,6 +2,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const dirs = require("./direction-note.js");
 
 // --- Load .env (no dependency) ---
 function loadEnv() {
@@ -441,6 +442,78 @@ async function resolveMapPoint(input) {
   if (pm) label = decodeURIComponent(pm[1].replace(/\+/g, " ")).trim();
   if (!label) label = `${pt.lat.toFixed(4)}, ${pt.lon.toFixed(4)}`;
   return { ...pt, label: label.slice(0, 60) };
+}
+
+// --- Written route note ("#DIRECTION") from a Google Maps link ---
+// Dispatch writes these by hand today: which interstates the driver takes and
+// which numbered exit joins the next one. The routing engine already knows the
+// road-by-road path, so the note can be drafted from the link and then read
+// over — see the caveat below about what it does not know.
+const OSRM_BASE = process.env.OSRM_API || "https://router.project-osrm.org";
+async function directionRoute(coords) {
+  const via = coords.map((c) => `${c.lon},${c.lat}`).join(";");
+  const r = await fetch(`${OSRM_BASE}/route/v1/driving/${via}?overview=false&steps=true`, { signal: AbortSignal.timeout(25000) });
+  if (!r.ok) throw new Error(`marshrut xizmati javob bermadi (${r.status})`);
+  const j = await r.json();
+  const route = j.routes && j.routes[0];
+  if (!route) throw new Error("bu bekatlar orasida yo'l topilmadi");
+  const steps = [];
+  for (const leg of route.legs || []) for (const s of leg.steps || []) steps.push(s);
+  return { miles: route.distance / 1609.34, steps };
+}
+async function buildDirectionNote({ url, unit, dispatchedMiles }) {
+  const link = String(url || "").trim();
+  if (!link) return { ok: false, error: "link kiritilmagan" };
+  // Short share links carry nothing until they redirect.
+  let expanded = link;
+  if (/goo\.gl/.test(link)) {
+    try {
+      const r = await fetch(link, { redirect: "follow", signal: AbortSignal.timeout(12000) });
+      expanded = r.url || link;
+    } catch { /* fall through and try to parse the short form */ }
+  }
+  let points = dirs.parseMapsPoints(expanded);
+  if (points.length < 2) {
+    const wp = dirs.parseDataWaypoints(expanded);
+    if (wp.length >= 2) points = wp;
+  }
+  if (points.length < 2) return { ok: false, error: "linkdan kamida ikkita bekat topilmadi — Maps'da yo'nalish linkini oching va uni tashlang" };
+  const coords = [];
+  for (const p of points) {
+    if (p.lat != null) { coords.push({ lat: p.lat, lon: p.lon }); continue; }
+    const g = await geocodePlace(p.place);
+    if (g) coords.push({ lat: g.lat, lon: g.lon });
+  }
+  if (coords.length < 2) return { ok: false, error: "manzillarni koordinataga o'girib bo'lmadi" };
+  let route;
+  try { route = await directionRoute(coords); } catch (e) { return { ok: false, error: e.message }; }
+  // DH is the empty run the truck is sitting on right now, so it is measured
+  // from where the unit actually is to the first stop — not from the link.
+  let dhMiles;
+  if (unit) {
+    try {
+      const data = await getFuelData();
+      const truck = (data.fleet || []).find((x) => String(x.unit) === String(unit));
+      if (truck && truck.lat != null && truck.lon != null) {
+        dhMiles = (await roadDistance(truck.lat, truck.lon, coords[0].lat, coords[0].lon)).miles;
+      }
+    } catch { /* DH is optional — the note is still worth sending without it */ }
+  }
+  const lines = dirs.directionLines(route.steps);
+  const dispatched = Number(dispatchedMiles);
+  return {
+    ok: true,
+    note: dirs.buildNote({
+      lines,
+      dhMiles,
+      routeMiles: route.miles,
+      dispatchedMiles: Number.isFinite(dispatched) && dispatched > 0 ? dispatched : undefined,
+    }),
+    lines,
+    stops: coords.length,
+    miles: Math.round(route.miles),
+    dh: Number.isFinite(dhMiles) ? Math.round(dhMiles * 100) / 100 : null,
+  };
 }
 
 // --- Per-unit notes (driver quirks: uses exits, no calls, etc.) — durable ---
@@ -1343,6 +1416,20 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
+  if (req.url === "/api/direction" && req.method === "POST") {
+    // Drafting a direction is part of the directions trial, so it answers to
+    // the same ops seat rather than opening a second door into the feature.
+    if (req._role !== "ops") {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "forbidden" }));
+      return;
+    }
+    const out = await buildDirectionNote((await readBody(req)) || {});
+    res.writeHead(out.ok ? 200 : 400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(out));
+    return;
+  }
+
   // GET too, so the setup can be finished from the browser's address bar.
   if (req.url === "/api/telegram/test") {
     const sent = await tgSend("✅ MOVEX fuel board — Telegram ulanishi ishlayapti. Toll eslatmalari shu yerga keladi.");
