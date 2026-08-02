@@ -251,6 +251,15 @@
           <label class="toggle dir-toggle"><input type="checkbox" id="dir-show-done"> Tasdiqlanganlarni ham ko'rsatish</label>
         </div>
 
+        <!-- Paste a Maps link, get the written note. Nothing else is required. -->
+        <div class="dir-draft">
+          <input id="dir-link" placeholder="Google Maps link — yo'nalishni shu yerga qo'ying" autocomplete="off">
+          <button class="btn primary" type="button" id="dir-draft-go">🛣️ Yozib ber</button>
+          <button class="btn" type="button" id="dir-draft-copy" hidden>📋 Nusxa</button>
+          <span id="dir-draft-state" class="dir-draft-state"></span>
+          <textarea id="dir-draft-out" rows="14" spellcheck="false" hidden></textarea>
+        </div>
+
         <form id="dir-form" class="dir-form hidden">
           <input id="dir-f-driver" placeholder="Driver" style="width:170px">
           <input id="dir-f-unit" placeholder="Unit" style="width:70px">
@@ -258,8 +267,6 @@
           <input id="dir-f-route" placeholder="From > To" style="width:130px">
           <input id="dir-f-pu" placeholder="PU (joy)" style="width:150px">
           <input id="dir-f-putime" placeholder="PU vaqti" style="width:120px">
-          <input id="dir-f-link" placeholder="Google Maps link (ixtiyoriy)" style="width:230px">
-          <button class="btn" type="button" id="dir-f-draft" title="Linkdan #DIRECTION matnini yozib beradi">🛣️ Yo'nalishni yozib ber</button>
           <textarea id="dir-f-dir" placeholder="Direction / izoh" rows="3" style="width:100%"></textarea>
           <button class="btn primary" type="submit">Qo'shish</button>
           <button class="btn" type="button" id="dir-f-cancel">Bekor</button>

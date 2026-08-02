@@ -589,6 +589,27 @@ footer {
 .dir-sep { display: inline-block; width: 1px; height: 22px; background: var(--border); margin: 0 3px; }
 .dir-toggle { margin-left: auto; font-size: 12.5px; }
 
+/* Paste a Maps link -> the written note. The link box takes the room it needs;
+   the note only shows once there is one. */
+.dir-draft { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
+.dir-draft input {
+  flex: 1 1 320px; min-width: 0;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 7px; padding: 8px 11px; font-size: 13px;
+}
+.dir-draft input:focus { outline: none; border-color: var(--accent); }
+.dir-draft-state { color: var(--text-mute); font-size: 12px; }
+.dir-draft-state.bad { color: var(--critical); }
+.dir-draft textarea {
+  flex: 1 1 100%;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 7px; padding: 10px 12px; font-size: 13px; line-height: 1.55;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  resize: vertical;
+}
+.dir-draft textarea:focus { outline: none; border-color: var(--accent); }
+.dir-draft [hidden], .dir-draft textarea[hidden] { display: none; }
+
 .dir-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
 .dir-form input {
   background: var(--surface-2); border: 1px solid var(--border); color: var(--text);

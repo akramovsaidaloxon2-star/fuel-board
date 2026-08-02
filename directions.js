@@ -180,25 +180,45 @@
   }
 
   // Draft the "#DIRECTION" note from a Google Maps link so it doesn't have to be
-  // typed exit by exit. The result lands in the direction box for review — it is
-  // a car route, so it knows nothing about bridge heights or truck bans.
+  // typed exit by exit. A link is the whole input; the note comes back in an
+  // editable box to be read over before it goes to a driver — it is a car
+  // route, so it knows nothing about bridge heights or truck bans.
   async function draftFromLink(btn) {
-    const url = $("#dir-f-link").value.trim();
-    if (!url) { alert("Avval Google Maps linkini qo'ying."); return; }
+    const url = $("#dir-link").value.trim();
+    const out = $("#dir-draft-out"), state = $("#dir-draft-state"), copy = $("#dir-draft-copy");
+    if (!url) { state.textContent = "Avval linkni qo'ying"; state.className = "dir-draft-state bad"; return; }
     btn.disabled = true;
     const old = btn.textContent;
     btn.textContent = "Yozilmoqda…";
+    state.textContent = ""; state.className = "dir-draft-state";
     try {
       const res = await fetch("/api/direction", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, unit: $("#dir-f-unit").value.trim() }),
+        body: JSON.stringify({ url }),
       });
       const j = await res.json();
-      if (!j.ok) { alert(j.error || "Yo'nalish chiqmadi"); return; }
-      $("#dir-f-dir").value = j.note;
-      if (!$("#dir-f-route").value.trim() && j.miles) $("#dir-f-route").value = j.miles + " mi";
-    } catch (e) { alert("Xato: " + e.message); }
-    finally { btn.disabled = false; btn.textContent = old; }
+      if (!j.ok) {
+        state.textContent = j.error || "Yo'nalish chiqmadi";
+        state.className = "dir-draft-state bad";
+        return;
+      }
+      out.value = j.note;
+      out.hidden = false; copy.hidden = false;
+      state.textContent = `${j.lines.length} ta yo'nalish · ${j.miles} mi · ${j.stops} bekat`;
+    } catch (e) {
+      state.textContent = "Xato: " + e.message;
+      state.className = "dir-draft-state bad";
+    } finally { btn.disabled = false; btn.textContent = old; }
+  }
+
+  async function copyDraft(btn) {
+    const text = $("#dir-draft-out").value;
+    if (!text) return;
+    try { await navigator.clipboard.writeText(text); }
+    catch { $("#dir-draft-out").select(); document.execCommand("copy"); }  // older/http contexts
+    const old = btn.textContent;
+    btn.textContent = "✓ Olindi";
+    setTimeout(() => (btn.textContent = old), 1500);
   }
 
   function setMuted(v) {
@@ -215,7 +235,12 @@
       $("#dir-sync").addEventListener("click", (e) => sync(e.currentTarget));
       $("#dir-new").addEventListener("click", () => { $("#dir-form").classList.toggle("hidden"); $("#dir-f-driver").focus(); });
       $("#dir-f-cancel").addEventListener("click", () => $("#dir-form").classList.add("hidden"));
-      $("#dir-f-draft").addEventListener("click", (e) => draftFromLink(e.currentTarget));
+      $("#dir-draft-go").addEventListener("click", (e) => draftFromLink(e.currentTarget));
+      $("#dir-draft-copy").addEventListener("click", (e) => copyDraft(e.currentTarget));
+      // Enter in the link box drafts, rather than doing nothing.
+      $("#dir-link").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); draftFromLink($("#dir-draft-go")); }
+      });
       $("#dir-form").addEventListener("submit", addManual);
       $("#dir-show-done").addEventListener("change", (e) => { showDone = e.target.checked; render(); });
     }
