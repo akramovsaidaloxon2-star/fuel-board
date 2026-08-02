@@ -325,7 +325,9 @@ function formatMiles(mi) {
 function buildNote({ lines, dhMiles, routeMiles, dispatchedMiles }) {
   const body = [];
   body.push("#DIRECTION", "", "After PU please follow the direction !!", "");
-  if (lines && lines.length) body.push(...lines.map((l) => l), "");
+  // A blank line between turns: the driver reads this on a phone, one leg at a
+  // time, and a solid block is hard to keep a place in.
+  if (lines && lines.length) body.push(lines.join("\n\n"), "");
   else body.push("(yo'nalish topilmadi — linkni tekshiring)", "");
   if (Number.isFinite(dhMiles)) body.push(`DH: ${formatMiles(dhMiles)}`);
   if (Number.isFinite(dispatchedMiles)) body.push(`Dispatched loaded miles: ${Math.round(dispatchedMiles)}`);

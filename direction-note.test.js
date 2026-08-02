@@ -77,6 +77,8 @@ const note = d.buildNote({ lines: d.directionLines(steps), dhMiles: 96.71, route
 console.log(note.split("\n").map(l => "   | " + l).join("\n"));
 if (!/DH: 96\.71/.test(note) || !/Loaded miles with direction: 3127/.test(note)) { fail++; console.log("  ✗ millar noto'g'ri"); }
 else console.log("  ✓ millar joyida");
+eq(/I 95 South > Exit 89 > I 495 South\n\nI 495 South/.test(note), true, "qatorlar orasida bo'sh satr bor");
+eq(/\n{3,}/.test(note), false, "ikkitadan ortiq bo'sh satr yo'q");
 
 
 console.log("\n=== 7. Google matnidan (haqiqiy nusxa)");
