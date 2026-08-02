@@ -42,20 +42,10 @@
       <button class="tab" data-view="map"><span class="tab-ic">🗺️</span>Map</button>
       <button class="tab" data-view="idle"><span class="tab-ic">⏱️</span>Idle report</button>
       <button class="tab" data-view="coverage"><span class="tab-ic">📡</span>Sensor coverage</button>
-      <button class="tab dir-only" data-view="directions"><span class="tab-ic">🛣️</span>Directions<span id="dir-badge" class="tab-badge hidden">0</span></button>
+      <button class="tab" data-view="directions"><span class="tab-ic">🛣️</span>Direction</button>
     </nav>
     <div class="content-area">
 
-    <!-- Nags from any tab while a toll direction is still unconfirmed. -->
-    <div id="dir-banner" class="dir-banner hidden">
-      <span class="dir-banner-ic">🛣️</span>
-      <div class="dir-banner-txt">
-        <strong id="dir-banner-title">Tasdiqlanmagan direction</strong>
-        <span id="dir-banner-sub"></span>
-      </div>
-      <button class="btn" id="dir-banner-go">Ko'rish →</button>
-      <button class="btn icon-btn" id="dir-banner-mute" title="Ovozni o'chirish / yoqish">🔔</button>
-    </div>
 
     <div id="view-board">
     <section class="stats">
@@ -243,44 +233,16 @@
     <div id="view-directions" class="hidden">
       <section class="dir-panel">
         <div class="dir-head">
-          <h3>🛣️ Berilgan directionlar <span id="dir-count" class="dir-count">0</span></h3>
-          <span id="dir-state" class="dir-state"></span>
-          <span class="dir-sep"></span>
-          <button class="btn" id="dir-sync">🔄 Sheet'dan yangilash</button>
-          <button class="btn" id="dir-new">➕ Qo'lda qo'shish</button>
-          <label class="toggle dir-toggle"><input type="checkbox" id="dir-show-done"> Tasdiqlanganlarni ham ko'rsatish</label>
+          <h3>🛣️ Yo'nalish yozish</h3>
         </div>
 
-        <!-- Paste a Maps link, get the written note. Nothing else is required. -->
+        <!-- Paste a Maps link, get the written note. That is the whole feature. -->
         <div class="dir-draft">
           <input id="dir-link" placeholder="Google Maps link — yo'nalishni shu yerga qo'ying" autocomplete="off">
           <button class="btn primary" type="button" id="dir-draft-go">🛣️ Yozib ber</button>
           <button class="btn" type="button" id="dir-draft-copy" hidden>📋 Nusxa</button>
           <span id="dir-draft-state" class="dir-draft-state"></span>
-          <textarea id="dir-draft-out" rows="14" spellcheck="false" hidden></textarea>
-        </div>
-
-        <form id="dir-form" class="dir-form hidden">
-          <input id="dir-f-driver" placeholder="Driver" style="width:170px">
-          <input id="dir-f-unit" placeholder="Unit" style="width:70px">
-          <input id="dir-f-load" placeholder="Load ID" style="width:110px">
-          <input id="dir-f-route" placeholder="From > To" style="width:130px">
-          <input id="dir-f-pu" placeholder="PU (joy)" style="width:150px">
-          <input id="dir-f-putime" placeholder="PU vaqti" style="width:120px">
-          <textarea id="dir-f-dir" placeholder="Direction / izoh" rows="3" style="width:100%"></textarea>
-          <button class="btn primary" type="submit">Qo'shish</button>
-          <button class="btn" type="button" id="dir-f-cancel">Bekor</button>
-        </form>
-
-        <div class="dir-list-wrap">
-          <table class="idle-table dir-table" id="dir-table">
-            <thead><tr>
-              <th>Holat</th><th>Driver</th><th>Unit</th><th>Load ID</th><th>From &gt; To</th>
-              <th>PU</th><th>PU vaqti</th><th>Direction</th><th>Kutmoqda</th><th>Eslatma</th><th></th>
-            </tr></thead>
-            <tbody id="dir-rows"></tbody>
-          </table>
-          <div id="dir-empty" class="empty hidden">Direction yo'q</div>
+          <textarea id="dir-draft-out" rows="16" spellcheck="false" hidden></textarea>
         </div>
       </section>
 
@@ -288,7 +250,7 @@
         <div class="info-icon">i</div>
         <div>
           <strong>Qanday ishlaydi</strong>
-          <p>Dispatch Google Sheet'idagi yangi qatorlar avtomatik shu ro'yxatga tushadi — sheet <strong>faqat o'qiladi</strong>, hech narsa yozilmaydi. Har bir direction <strong>⏳ Kutilmoqda</strong> holatida turadi va tasdiqlanmaguncha eslatib turadi: sahifada banner va ovoz, Telegram'ga esa belgilangan oraliqda qayta xabar. Driver tasdiqlagach <strong>✓ Confirm</strong> bosiladi va eslatma to'xtaydi. Bu <strong>Fuel board'dagi 📍 toll nuqtasi</strong> eslatmasidan farq qiladi: u <em>joyga</em> qarab (20 mil qolganda), bu esa <em>javobga</em> qarab ishlaydi.</p>
+          <p>Google Maps yo'nalish linkini qo'ying — qaysi interstate'dan qaysi <strong>Exit</strong> orqali qaysisiga o'tilishi qatorma-qator yozib beriladi, oxirida yo'l uzunligi bilan. Matnni tahrirlab, nusxa olib driverga yuborasiz. <strong>Diqqat:</strong> yo'nalish yengil mashina uchun hisoblanadi — past ko'prik, og'irlik cheklovi va truck taqiqlarini bilmaydi, shuning uchun yuborishdan oldin ko'zdan kechiring.</p>
         </div>
       </section>
     </div>
