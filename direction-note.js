@@ -102,8 +102,11 @@ function parseDataWaypoints(url) {
 }
 
 // --- Route steps into written directions ------------------------------------
-// A road's name comes from its ref ("I 95"); the compass half ("South") is not
-// in the map data, so it is read off the bearing the driver is travelling.
+// A road's name comes from its ref ("I 95"). The compass half is the half that
+// goes wrong: "I 81 South" is what the sign says, but the ramp joining it can
+// curve through west, so the heading at the moment of the merge is no guide.
+// In order of trust: the sign text the map data carries, then the direction the
+// road actually runs over its whole length, and only then the turn heading.
 function cardinal(bearing) {
   if (!Number.isFinite(bearing)) return "";
   const b = ((bearing % 360) + 360) % 360;
@@ -111,6 +114,36 @@ function cardinal(bearing) {
   if (b < 135) return "East";
   if (b < 225) return "South";
   return "West";
+}
+
+const CARD = { n: "North", s: "South", e: "East", w: "West" };
+// Sign text reads "I 81 South, Wilkes-Barre" or "I-81 S; Harrisburg".
+function cardinalFromSign(text) {
+  const s = String(text || "");
+  const word = s.match(/\b(north|south|east|west)\b/i);
+  if (word) return CARD[word[1][0].toLowerCase()];
+  const letter = s.match(/\b[A-Za-z]{1,3}[- ]?\d+[A-Za-z]?\s+([NSEW])\b/);
+  return letter ? CARD[letter[1].toLowerCase()] : "";
+}
+
+function bearingBetween(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b)) return NaN;
+  const [lon1, lat1] = [+a[0], +a[1]], [lon2, lat2] = [+b[0], +b[1]];
+  if (![lon1, lat1, lon2, lat2].every(Number.isFinite)) return NaN;
+  const toR = Math.PI / 180;
+  const p1 = lat1 * toR, p2 = lat2 * toR, dl = (lon2 - lon1) * toR;
+  const y = Math.sin(dl) * Math.cos(p2);
+  const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl);
+  return (Math.atan2(y, x) * (180 / Math.PI) + 360) % 360;
+}
+
+// Where this step's road actually goes: from where it starts to where the next
+// manoeuvre picks up. A 125-mile run south reads as south however the on-ramp
+// happened to be pointing.
+function travelBearing(list, i) {
+  const here = list[i] && list[i].maneuver && list[i].maneuver.location;
+  const next = list[i + 1] && list[i + 1].maneuver && list[i + 1].maneuver.location;
+  return bearingBetween(here, next);
 }
 
 // OSM refs can carry several designations at once ("I 95;US 1"); the first is
@@ -122,11 +155,21 @@ function roadRef(step) {
   return name;
 }
 
-function roadLabel(step) {
+// { ref, dir } rather than one string, so two labels can be compared by road
+// without having to guess which trailing word was the compass half.
+function roadLabel(step, list, i, signHint) {
   const ref = roadRef(step);
-  if (!ref) return "";
-  const dir = cardinal(step && step.maneuver && step.maneuver.bearing_after);
-  return dir ? `${ref} ${dir}` : ref;
+  if (!ref) return null;
+  const dir = cardinalFromSign(signHint)
+    || cardinalFromSign(step && step.destinations)
+    || cardinal(travelBearing(list, i))
+    || cardinal(step && step.maneuver && step.maneuver.bearing_after);
+  return { ref, dir };
+}
+
+function labelText(label) {
+  if (!label) return "";
+  return label.dir ? `${label.ref} ${label.dir}` : label.ref;
 }
 
 // The exit number lives on the ramp step, but only sometimes: OSM tags it as
@@ -145,30 +188,39 @@ const RAMP_TYPES = new Set(["off ramp", "on ramp", "fork", "merge"]);
 function directionLines(steps) {
   const lines = [];
   const list = Array.isArray(steps) ? steps : [];
-  let current = "";
+  let current = null;
 
   for (let i = 0; i < list.length; i++) {
     const step = list[i];
-    const label = roadLabel(step);
+    const label = roadLabel(step, list, i);
     const type = (step && step.maneuver && step.maneuver.type) || "";
 
-    if (!current) { if (label) current = label; continue; }
+    if (!current) { if (isRoad(label)) current = label; continue; }
 
     if (!RAMP_TYPES.has(type)) {
-      // Staying on the same road through a name change still updates the
-      // compass half, so a later line reads "I 95 South" and not "I 95 North".
-      if (label && roadRef(step) === current.split(" ").slice(0, -1).join(" ")) current = label;
+      // Staying on the same road still refreshes the compass half, so a run
+      // that turns south later reads "I 81 South" and not the heading it had
+      // when it was first joined.
+      if (label && label.ref === current.ref) current = label;
       continue;
     }
 
     // The ramp itself is usually unnamed; the road being joined is the next
-    // step that carries a ref of its own.
-    let next = label;
-    for (let j = i + 1; j < list.length && !isRoad(next); j++) next = roadLabel(list[j]);
-    if (!isRoad(next) || sameRoad(next, current)) continue;
+    // step carrying a ref of its own. The ramp's sign text names where it goes
+    // ("I 81 South, Wilkes-Barre"), so it settles the direction of that road.
+    const hint = step && step.destinations;
+    let next = isRoad(label) ? label : null;
+    for (let j = i + 1; j < list.length && !next; j++) {
+      const cand = roadLabel(list[j], list, j, hint);
+      if (isRoad(cand)) next = cand;
+    }
+    if (!next || next.ref === current.ref) continue;
+    if (!next.dir) next = { ref: next.ref, dir: cardinalFromSign(hint) };
 
     const exit = exitNumber(step);
-    lines.push(exit ? `${current} > Exit ${exit} > ${next}` : `${current} > ${next}`);
+    lines.push(exit
+      ? `${labelText(current)} > Exit ${exit} > ${labelText(next)}`
+      : `${labelText(current)} > ${labelText(next)}`);
     current = next;
   }
   return lines;
@@ -177,12 +229,7 @@ function directionLines(steps) {
 function isRoad(label) {
   // Ramps and service roads come through as empty or as a street name with no
   // designation; a route note is only useful when it names a signed road.
-  return /^[A-Z]{1,3}\s?-?\d/.test(String(label || "").trim());
-}
-
-function sameRoad(a, b) {
-  const ref = (s) => String(s || "").trim().split(" ").slice(0, -1).join(" ") || String(s || "").trim();
-  return ref(a) === ref(b);
+  return !!label && /^[A-Za-z]{1,3}\s?-?\d/.test(String(label.ref || "").trim());
 }
 
 // --- The note itself --------------------------------------------------------
@@ -207,7 +254,9 @@ module.exports = {
   directionLines,
   buildNote,
   cardinal,
+  cardinalFromSign,
   roadLabel,
+  labelText,
   exitNumber,
   formatMiles,
 };

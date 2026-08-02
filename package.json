@@ -5,7 +5,8 @@
   "description": "Fleet fuel monitoring board backed by the Motive API",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node direction-note.test.js"
   },
   "engines": {
     "node": ">=18"
