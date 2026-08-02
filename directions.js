@@ -179,6 +179,28 @@
     } catch (e2) { alert("Xato: " + e2.message); }
   }
 
+  // Draft the "#DIRECTION" note from a Google Maps link so it doesn't have to be
+  // typed exit by exit. The result lands in the direction box for review — it is
+  // a car route, so it knows nothing about bridge heights or truck bans.
+  async function draftFromLink(btn) {
+    const url = $("#dir-f-link").value.trim();
+    if (!url) { alert("Avval Google Maps linkini qo'ying."); return; }
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = "Yozilmoqda…";
+    try {
+      const res = await fetch("/api/direction", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, unit: $("#dir-f-unit").value.trim() }),
+      });
+      const j = await res.json();
+      if (!j.ok) { alert(j.error || "Yo'nalish chiqmadi"); return; }
+      $("#dir-f-dir").value = j.note;
+      if (!$("#dir-f-route").value.trim() && j.miles) $("#dir-f-route").value = j.miles + " mi";
+    } catch (e) { alert("Xato: " + e.message); }
+    finally { btn.disabled = false; btn.textContent = old; }
+  }
+
   function setMuted(v) {
     muted = v;
     localStorage.setItem("dirMuted", v ? "1" : "0");
@@ -187,13 +209,13 @@
   }
 
   window.initDirections = function () {
-    // Non-ops seats have the whole panel stripped from the DOM — nothing to wire.
     if (!document.querySelector(".dir-panel")) return;
     if (!wired) {
       wired = true;
       $("#dir-sync").addEventListener("click", (e) => sync(e.currentTarget));
       $("#dir-new").addEventListener("click", () => { $("#dir-form").classList.toggle("hidden"); $("#dir-f-driver").focus(); });
       $("#dir-f-cancel").addEventListener("click", () => $("#dir-form").classList.add("hidden"));
+      $("#dir-f-draft").addEventListener("click", (e) => draftFromLink(e.currentTarget));
       $("#dir-form").addEventListener("submit", addManual);
       $("#dir-show-done").addEventListener("change", (e) => { showDone = e.target.checked; render(); });
     }

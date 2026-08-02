@@ -17,11 +17,6 @@ services:
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
-      # Operations seat — the only role that sees the toll-direction trial
-      - key: OPS_USER
-        sync: false
-      - key: OPS_PASS
-        sync: false
       # Toll directions: dispatch sheet intake + confirm-or-nag reminders
       - key: TOLL_SHEET_CSV
         sync: false

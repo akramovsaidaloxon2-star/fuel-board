@@ -21,30 +21,26 @@ const API_KEY = process.env.MOTIVE_API_KEY;
 const PORT = process.env.PORT || 3000;
 const MOTIVE_BASE = process.env.MOTIVE_BASE || "https://api.gomotive.com";
 
-// Login with roles. Manager = full access; worker = Fuel board / Map / Idle only.
+// One seat: the manager, with the whole board behind it. The worker and ops
+// seats were removed — everything they gated is now the manager's.
+// AUTH_USER/AUTH_PASS stays as the original name for that same login, so a
+// deployment configured under either pair keeps working.
 const AUTH_USER = process.env.AUTH_USER || "";       // legacy single login = manager
 const AUTH_PASS = process.env.AUTH_PASS || "";
 const MANAGER_USER = process.env.MANAGER_USER || "";
 const MANAGER_PASS = process.env.MANAGER_PASS || "";
-const WORKER_USER = process.env.WORKER_USER || "";
-const WORKER_PASS = process.env.WORKER_PASS || "";
-// Operations seat: everything the manager sees, plus the toll-direction board
-// below, which is on trial and stays invisible to the manager/worker seats.
-// Leave OPS_USER/OPS_PASS unset and the whole feature is simply switched off.
-const OPS_USER = process.env.OPS_USER || "";
-const OPS_PASS = process.env.OPS_PASS || "";
-const AUTH_ON = !!(AUTH_USER && AUTH_PASS) || !!(MANAGER_USER && MANAGER_PASS) || !!(WORKER_USER && WORKER_PASS) || !!(OPS_USER && OPS_PASS);
+const AUTH_ON = !!(AUTH_USER && AUTH_PASS) || !!(MANAGER_USER && MANAGER_PASS);
 
 // Validate a username/password -> role (used by the login form).
 function roleFor(u, p) {
   if (MANAGER_USER && u === MANAGER_USER && p === MANAGER_PASS) return "manager";
   if (AUTH_USER && u === AUTH_USER && p === AUTH_PASS) return "manager";
-  if (OPS_USER && u === OPS_USER && p === OPS_PASS) return "ops";
-  if (WORKER_USER && u === WORKER_USER && p === WORKER_PASS) return "worker";
   return null;
 }
-// Signed session cookie (no DB needed).
-const SESSION_SECRET = process.env.SESSION_SECRET || (MANAGER_PASS + WORKER_PASS + AUTH_PASS + "mvx-v1");
+// Signed session cookie (no DB needed). The retired seats' passwords stay in
+// the secret's recipe: dropping them would change the signing key and log
+// everyone out on deploy for no benefit.
+const SESSION_SECRET = process.env.SESSION_SECRET || (MANAGER_PASS + (process.env.WORKER_PASS || "") + AUTH_PASS + "mvx-v1");
 function sign(s) { return crypto.createHmac("sha256", SESSION_SECRET).update(s).digest("base64url"); }
 function makeToken(role) { const p = role + "." + (Date.now() + 30 * 864e5); return p + "." + sign(p); }
 function verifyToken(tok) {
@@ -54,7 +50,9 @@ function verifyToken(tok) {
   const [role, exp, sig] = parts;
   if (sign(role + "." + exp) !== sig) return null;
   if (Date.now() > +exp) return null;
-  if (role !== "manager" && role !== "worker" && role !== "ops") return null;
+  // Cookies issued to the retired seats stop verifying here, so those sessions
+  // land back on the login page instead of holding access that no longer exists.
+  if (role !== "manager") return null;
   return role;
 }
 function getCookie(req, name) {
@@ -1092,14 +1090,8 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // --- Toll directions (trial): walled off to the operations seat, so the
-  // manager and worker boards behave exactly as they did before this shipped. ---
+  // --- Toll directions: part of the manager's board, same as every other view. ---
   if (/^\/api\/directions\b/.test(req.url)) {
-    if (req._role !== "ops") {
-      res.writeHead(403, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "forbidden" }));
-      return;
-    }
     const dirMatch = req.url.match(/^\/api\/directions\/([\w-]+)$/);
     const dirJson = (code, obj) => { res.writeHead(code, { "Content-Type": "application/json" }); res.end(JSON.stringify(obj)); };
 
@@ -1417,13 +1409,6 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (req.url === "/api/direction" && req.method === "POST") {
-    // Drafting a direction is part of the directions trial, so it answers to
-    // the same ops seat rather than opening a second door into the feature.
-    if (req._role !== "ops") {
-      res.writeHead(403, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "forbidden" }));
-      return;
-    }
     const out = await buildDirectionNote((await readBody(req)) || {});
     res.writeHead(out.ok ? 200 : 400, { "Content-Type": "application/json" });
     res.end(JSON.stringify(out));
@@ -1534,11 +1519,10 @@ server.listen(PORT, () => {
   console.log(`\n  Fuel board running:  http://localhost:${PORT}`);
   console.log(`  API endpoint:        http://localhost:${PORT}/api/fuel`);
   console.log(`  Motive key:          ${API_KEY ? "loaded ✓" : "MISSING ✗"}`);
-  console.log(`  Login:               ${AUTH_ON ? `on (user: ${AUTH_USER}) ✓` : "OFF — set AUTH_USER/AUTH_PASS for cloud"}`);
+  console.log(`  Login:               ${AUTH_ON ? `on (user: ${MANAGER_USER || AUTH_USER}) ✓` : "OFF — set MANAGER_USER/MANAGER_PASS for cloud"}`);
   console.log(`  Stations:            Pilot ${Object.keys(brandStations.pilot).length} · Love's ${Object.keys(brandStations.loves).length} · TA/Petro ${Object.keys(brandStations.ta).length}`);
   console.log(`  Durable store:       ${GH_ON ? "configuring…" : "OFF — set GH_TOKEN/GH_REPO for permanence"}`);
   console.log(`  Toll reminder:       ${TG_ON ? `Telegram ✓ (chat ${TG_CHAT})` : "board only — set TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID for Telegram"}`);
-  console.log(`  Ops seat:            ${OPS_USER && OPS_PASS ? `on (user: ${OPS_USER}) ✓` : "OFF — set OPS_USER/OPS_PASS to enable toll directions"}`);
   console.log(`  Toll directions:     ${SHEET_ON ? `sheet har ${SHEET_POLL_MIN} daq · eslatma har ${REMIND_EVERY_MIN} daq ✓` : "OFF — set TOLL_SHEET_CSV"}\n`);
   initDurable()
     .catch((e) => console.error("initDurable", e.message))

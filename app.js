@@ -799,23 +799,10 @@ if (priceBtn) priceBtn.addEventListener("click", () => $("#price-file").click())
 const priceFileInput = $("#price-file");
 if (priceFileInput) priceFileInput.addEventListener("change", (e) => { if (e.target.files[0]) uploadPriceFile(e.target.files[0]); });
 
-// Role is still reported by /api/me; every remaining view is open to both roles.
+// One seat now, so nothing is stripped from the board — the directions tab and
+// its banner belong to the manager along with everything else.
 fetch("/api/me").then((r) => r.json()).then((j) => {
   ROLE = j.role || "manager";
-  document.body.classList.toggle("role-worker", ROLE === "worker");
-  document.body.classList.toggle("role-ops", ROLE === "ops");
-  if (ROLE === "worker") {
-    const badge = document.querySelector(".subtitle");
-    if (badge) badge.textContent = "Worker view";
-  }
-  if (ROLE === "ops") {
-    const badge = document.querySelector(".subtitle");
-    if (badge) badge.textContent = "Operations seat";
-  } else {
-    // Toll directions are still on trial: strip every trace of them from the DOM
-    // so the manager and worker boards look exactly as they did before.
-    document.querySelectorAll("#dir-banner, #view-directions, .tab.dir-only").forEach((el) => el.remove());
-  }
   loadFsBoard();
   loadFuelPrice();
 }).catch(() => {});
