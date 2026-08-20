@@ -708,6 +708,7 @@ function setupTabs() {
       if (view === "idle") renderIdle();
       if (view === "map") renderMap();
       if (view === "directions" && window.initDirections) window.initDirections();
+      if (view === "audit" && window.initAudit) window.initAudit();
     });
   });
 }

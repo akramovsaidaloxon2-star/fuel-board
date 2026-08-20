@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const dirs = require("./direction-note.js");
+const audit = require("./fuel-audit.js");
 
 // --- Load .env (no dependency) ---
 function loadEnv() {
@@ -1472,6 +1473,36 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
+  if (req.url === "/api/fuel-audit" && req.method === "POST") {
+    const body = (await readBody(req)) || {};
+    const txns = Array.isArray(body.txns) ? body.txns : [];
+    if (!txns.length) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "hisobotda yoqilg'i xaridlari topilmadi" }));
+      return;
+    }
+    const out = audit.auditReport(txns, fuelEvents);
+    // How far back the fills go decides what can be judged at all, so it is
+    // reported alongside: without it a page full of "unknown" looks broken
+    // rather than simply early.
+    let earliest = null, fills = 0;
+    for (const u of Object.keys(fuelEvents)) {
+      for (const f of fuelEvents[u]) {
+        fills++;
+        const t = Date.parse(f.at);
+        if (Number.isFinite(t) && (earliest == null || t < earliest)) earliest = t;
+      }
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      ok: true,
+      rows: out.rows,
+      summary: out.summary,
+      history: { fills, units: Object.keys(fuelEvents).length, since: earliest ? new Date(earliest).toISOString() : null },
+    }));
+    return;
+  }
+
   if (req.url === "/api/direction" && req.method === "POST") {
     const out = await buildDirectionNote((await readBody(req)) || {});
     res.writeHead(out.ok ? 200 : 400, { "Content-Type": "application/json" });

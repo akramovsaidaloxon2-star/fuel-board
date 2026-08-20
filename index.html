@@ -43,6 +43,7 @@
       <button class="tab" data-view="idle"><span class="tab-ic">⏱️</span>Idle report</button>
       <button class="tab" data-view="coverage"><span class="tab-ic">📡</span>Sensor coverage</button>
       <button class="tab" data-view="directions"><span class="tab-ic">🛣️</span>Direction</button>
+      <button class="tab" data-view="audit"><span class="tab-ic">🧾</span>Fuel audit</button>
     </nav>
     <div class="content-area">
 
@@ -260,6 +261,46 @@
       </section>
     </div>
 
+    <div id="view-audit" class="hidden">
+      <section class="dir-panel">
+        <div class="dir-head">
+          <h3>🧾 Haftalik hisobot tekshiruvi</h3>
+        </div>
+        <div class="dir-draft">
+          <button class="btn primary" type="button" id="audit-btn">⬆️ Haftalik hisobotni yuklash (.xlsx / .csv)</button>
+          <input type="file" id="audit-file" accept=".xls,.xlsx,.csv" hidden>
+          <label class="toggle"><input type="checkbox" id="audit-only-bad"> Faqat shubhalilarni ko'rsatish</label>
+          <span id="audit-state" class="dir-draft-state"></span>
+        </div>
+
+        <div id="audit-result" hidden>
+          <div id="audit-sum" class="audit-sum"></div>
+          <div id="audit-note" class="audit-note hidden"></div>
+          <div class="dir-list-wrap">
+            <table class="idle-table audit-table">
+              <thead><tr>
+                <th>Xulosa</th><th>Unit</th><th>Vaqt</th><th class="num">Gallon</th>
+                <th class="num">Bak</th><th class="num">Bak≈</th><th class="num">Odatda</th>
+                <th class="num">Farq</th><th>Zapravka</th><th>Sabab</th>
+              </tr></thead>
+              <tbody id="audit-rows"></tbody>
+            </table>
+            <div id="audit-empty" class="empty hidden">Qator yo'q</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="info-card">
+        <div class="info-icon">i</div>
+        <div>
+          <strong>Qanday tekshiriladi</strong>
+          <p>Har bir xarid bitta savolga javob beradi: <strong>bak bir foizga necha gallon?</strong> Bitta truck uchun bu son o'zgarmaydi — bu bakning o'zi. Shuning uchun truckning <strong>o'z tarixi</strong> o'lchov bo'ladi va bak hajmini kiritish shart emas. 20% → 100% ga 100 gallon ketgan bo'lsa, 35% → 100% ga 150 gallon ketishi mumkin emas.</p>
+          <p>DEF, scale va boshqa yoqilg'i bo'lmagan qatorlar hisobga olinmaydi. Bak 8 foizdan kam ko'tarilgan bo'lsa xulosa chiqarilmaydi — sensor aniqligi yetmaydi. Har bir unit uchun kamida ikkita oldingi quyish kerak.</p>
+          <p><strong>Bu shubha belgilaydi, ayblov emas.</strong> Buzilgan sensor, ikkinchi bak yoki reeferga quyilgan yoqilg'i ham xuddi shunday ko'rinadi — har bir belgini odam ko'rib chiqishi kerak.</p>
+        </div>
+      </section>
+    </div>
+
     </div><!-- /content-area -->
   </main>
 
@@ -285,5 +326,6 @@
   <script src="data.js"></script>
   <script src="app.js"></script>
   <script src="directions.js"></script>
+  <script src="audit.js"></script>
 </body>
 </html>

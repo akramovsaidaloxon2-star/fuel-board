@@ -122,10 +122,22 @@ function auditUnit(unit, txns, fills, opts) {
     };
 
     if (!fill) {
-      // Paid for, and the tank never moved. The strongest signal there is.
-      row.verdict = "suspicious";
-      row.reason = "bak ko'tarilmagan — bu vaqtda quyish qayd etilmagan";
-      row.missingGal = Math.round(txn.gallons);
+      // "The tank never moved" is the strongest accusation this makes, so it
+      // is only allowed where a fill would actually have been recorded. With no
+      // fills for the unit, or a purchase from before recording started, the
+      // silence means nothing was watching — not that nothing happened.
+      const tt = timeOf(txn.at);
+      if (!list.length) {
+        row.verdict = "unknown";
+        row.reason = "bu unit uchun quyish yozuvlari yo'q — sensori yo'q yoki hali yozilmagan";
+      } else if (o.historyFrom && Number.isFinite(tt) && tt < o.historyFrom) {
+        row.verdict = "unknown";
+        row.reason = "bu sana quyish tarixi boshlanishidan oldin — tekshirib bo'lmaydi";
+      } else {
+        row.verdict = "suspicious";
+        row.reason = "bak ko'tarilmagan — bu vaqtda quyish qayd etilmagan";
+        row.missingGal = Math.round(txn.gallons);
+      }
       rows.push(row);
       continue;
     }
@@ -177,18 +189,65 @@ function auditUnit(unit, txns, fills, opts) {
   return rows;
 }
 
+// Card reports timestamp a purchase in the station's local time; the fills are
+// recorded in UTC. Rather than ask which timezone a report is in — the answer
+// changes as trucks cross the country — measure it: pair each purchase with its
+// nearest fill, and the offset that keeps showing up is the report's.
+function estimateOffsetMs(txns, events) {
+  const deltas = [];
+  const wide = 14 * HOURS;
+  for (const t of txns || []) {
+    const u = String(t.unit == null ? "" : t.unit).trim();
+    const fills = (events || {})[u];
+    if (!fills || !fills.length) continue;
+    const tt = timeOf(t.at);
+    if (!Number.isFinite(tt)) continue;
+    let best = null, bestAbs = Infinity;
+    for (const f of fills) {
+      const ft = timeOf(f.at);
+      if (!Number.isFinite(ft)) continue;
+      const d = ft - tt;
+      if (Math.abs(d) <= wide && Math.abs(d) < bestAbs) { best = d; bestAbs = Math.abs(d); }
+    }
+    if (best != null) deltas.push(best);
+  }
+  // Under about a dozen pairs the median is as likely to be noise as signal.
+  if (deltas.length < 12) return { offsetMs: 0, samples: deltas.length, hours: 0 };
+  const m = median(deltas);
+  // Report timezones are whole hours; rounding keeps a few stray matches from
+  // dragging the whole report sideways by a few minutes.
+  const hours = Math.round(m / HOURS);
+  return { offsetMs: hours * HOURS, samples: deltas.length, hours };
+}
+
 // txns: [{ unit, at, gallons, station? }] — one week of card lines.
 // events: { unit: [ {at, endAt, from, to, lat, lon} ] } — recorded fills.
 function auditReport(txns, events, opts) {
+  const o = opts || {};
+  const tz = o.offsetMs == null ? estimateOffsetMs(txns, events) : { offsetMs: o.offsetMs, samples: null, hours: o.offsetMs / HOURS };
   const byUnit = {};
   for (const t of txns || []) {
     const u = String(t.unit == null ? "" : t.unit).trim();
     if (!u || !(t.gallons > 0)) continue;
-    (byUnit[u] = byUnit[u] || []).push(t);
+    // Shift the purchase onto the clock the fills were recorded on.
+    const shifted = tz.offsetMs ? { ...t, at: new Date(timeOf(t.at) + tz.offsetMs).toISOString(), localAt: t.at } : t;
+    (byUnit[u] = byUnit[u] || []).push(shifted);
   }
+  // Nothing before the first fill ever recorded can be judged, whichever unit
+  // it belongs to: that is simply where the record starts.
+  let historyFrom = o.historyFrom;
+  if (historyFrom == null) {
+    for (const u of Object.keys(events || {})) {
+      for (const f of events[u] || []) {
+        const t = timeOf(f.at);
+        if (Number.isFinite(t) && (historyFrom == null || t < historyFrom)) historyFrom = t;
+      }
+    }
+  }
+  const unitOpts = { ...o, historyFrom };
   const rows = [];
   for (const u of Object.keys(byUnit)) {
-    rows.push(...auditUnit(u, byUnit[u], (events || {})[u] || [], opts));
+    rows.push(...auditUnit(u, byUnit[u], (events || {})[u] || [], unitOpts));
   }
   const counts = rows.reduce((a, r) => { a[r.verdict] = (a[r.verdict] || 0) + 1; return a; }, {});
   const missing = rows
@@ -201,10 +260,13 @@ function auditReport(txns, events, opts) {
       suspicious: counts.suspicious || 0,
       check: counts.check || 0,
       unpaid: counts.unpaid || 0,
+      unknown: counts.unknown || 0,
       ok: counts.ok || 0,
       missingGal: missing,
+      tzHours: tz.hours,
+      tzSamples: tz.samples,
     },
   };
 }
 
-module.exports = { auditReport, auditUnit, impliedCapacity, median, MATCH_WINDOW_MS, TOLERANCE };
+module.exports = { auditReport, auditUnit, impliedCapacity, estimateOffsetMs, median, MATCH_WINDOW_MS, TOLERANCE };
