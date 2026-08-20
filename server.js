@@ -189,7 +189,13 @@ function saveFuelSeries() {
 // a time. Locations are not otherwise kept, so a fill nobody recorded while it
 // was happening can never be verified afterwards — hence recording it now,
 // before there is anything to compare it against.
-const FILL_MIN_PCT = 3;              // smaller rises are sensor noise or a slope
+// Measured against the lowest reading of the last couple of hours, not against
+// the previous one. A moving truck's gauge swings several points either way as
+// fuel slides around the tank — unit 5478 read 36 -> 39.2 -> 34.8 -> 39.2 in
+// five minutes, sitting still in terms of fuel. A rise from the recent floor
+// ignores that swing and still catches a fill delivered over several readings.
+const FILL_MIN_PCT = 10;             // a 150 gal tank: ~15 gallons
+const FILL_FLOOR_MS = 2 * 3600000;   // how far back to look for that floor
 const FILL_MERGE_MS = 45 * 60000;    // one fill arrives as several rising reads
 const EVENTS_STORE = path.join(__dirname, "fuel_events.json");
 let fuelEvents = {};
@@ -202,6 +208,19 @@ function saveFuelEvents() {
     ghSave("fuel_events.json", fuelEvents);
   }, 3000);
 }
+// Events recorded before the threshold was raised are tank slosh, not fills.
+// Dropping them on load keeps the noise out of every baseline computed later.
+function pruneFuelEvents() {
+  let dropped = 0;
+  for (const u of Object.keys(fuelEvents)) {
+    const keep = (fuelEvents[u] || []).filter((e) => (e.to - e.from) >= FILL_MIN_PCT);
+    dropped += (fuelEvents[u] || []).length - keep.length;
+    if (keep.length) fuelEvents[u] = keep; else delete fuelEvents[u];
+  }
+  if (dropped) { console.log(`  Fuel events:         ${dropped} ta chayqalish yozuvi tozalandi`); saveFuelEvents(); }
+  return dropped;
+}
+
 function recordFill(unit, t, from, to, loc) {
   const arr = (fuelEvents[unit] = fuelEvents[unit] || []);
   const last = arr[arr.length - 1];
@@ -235,7 +254,17 @@ function recordFuelPoint(unit, fuel, atISO, loc) {
   const last = arr[arr.length - 1];
   // Checked before the near-duplicate skip below, though a fill is far too big
   // a jump to be caught by it.
-  if (last && fuel - last[1] >= FILL_MIN_PCT) recordFill(unit, t, last[1], fuel, loc);
+  let floor = null;
+  // The floor is only looked for since the last fill ended. Otherwise the
+  // readings from before that fill stay in the window, and the next reading —
+  // a truck simply driving away on a full tank — reads as a second fill.
+  const done = fuelEvents[unit] || [];
+  const prev = done[done.length - 1];
+  const since = Math.max(t - FILL_FLOOR_MS, prev ? new Date(prev.endAt).getTime() : 0);
+  for (let i = arr.length - 1; i >= 0 && arr[i][0] >= since; i--) {
+    if (floor == null || arr[i][1] < floor) floor = arr[i][1];
+  }
+  if (floor != null && fuel - floor >= FILL_MIN_PCT) recordFill(unit, t, floor, fuel, loc);
   // skip near-duplicate readings (keeps the series compact, still catches jumps)
   if (last && Math.abs(last[0] - t) < 10 * 60000 && Math.abs(last[1] - fuel) < 0.5) return;
   arr.push([t, fuel]);
@@ -1545,7 +1574,7 @@ async function initDurable() {
     const o = await ghLoad("odo_daily.json");
     if (o && typeof o === "object") odoDaily = o;
     const fe = await ghLoad("fuel_events.json");
-    if (fe && typeof fe === "object" && !Array.isArray(fe)) fuelEvents = fe;
+    if (fe && typeof fe === "object" && !Array.isArray(fe)) { fuelEvents = fe; pruneFuelEvents(); }
     const as = await ghLoad("assignments.json");
     if (as && typeof as === "object" && !Array.isArray(as)) { assignments = as; migrateAssignments(); }
     const tp = await ghLoad("toll_points.json");
