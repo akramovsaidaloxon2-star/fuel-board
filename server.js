@@ -183,12 +183,58 @@ function saveFuelSeries() {
     ghSave("fuel_series.json", fuelSeries);
   }, 3000);
 }
-function recordFuelPoint(unit, fuel, atISO) {
+// A fuel-card line can only be checked against what actually went into the
+// tank, and that is knowable for a moment only: the level jumps, at a place, at
+// a time. Locations are not otherwise kept, so a fill nobody recorded while it
+// was happening can never be verified afterwards — hence recording it now,
+// before there is anything to compare it against.
+const FILL_MIN_PCT = 3;              // smaller rises are sensor noise or a slope
+const FILL_MERGE_MS = 45 * 60000;    // one fill arrives as several rising reads
+const EVENTS_STORE = path.join(__dirname, "fuel_events.json");
+let fuelEvents = {};
+try { fuelEvents = JSON.parse(fs.readFileSync(EVENTS_STORE, "utf8")); } catch { fuelEvents = {}; }
+let eventsTimer = null;
+function saveFuelEvents() {
+  clearTimeout(eventsTimer);
+  eventsTimer = setTimeout(() => {
+    fs.writeFile(EVENTS_STORE, JSON.stringify(fuelEvents), () => {});
+    ghSave("fuel_events.json", fuelEvents);
+  }, 3000);
+}
+function recordFill(unit, t, from, to, loc) {
+  const arr = (fuelEvents[unit] = fuelEvents[unit] || []);
+  const last = arr[arr.length - 1];
+  const lat = loc && loc.lat != null ? +loc.lat : null;
+  const lon = loc && loc.lon != null ? +loc.lon : null;
+  if (last && to > last.to && t - new Date(last.endAt).getTime() <= FILL_MERGE_MS) {
+    last.to = to;                                  // still climbing — same fill
+    last.endAt = new Date(t).toISOString();
+    last.pct = Math.round((last.to - last.from) * 10) / 10;
+    if (last.lat == null && lat != null) { last.lat = lat; last.lon = lon; }
+    saveFuelEvents();
+    return;
+  }
+  arr.push({
+    at: new Date(t).toISOString(),
+    endAt: new Date(t).toISOString(),
+    from, to,
+    pct: Math.round((to - from) * 10) / 10,
+    lat, lon,
+  });
+  const cutoff = Date.now() - 180 * 864e5;
+  while (arr.length && new Date(arr[0].at).getTime() < cutoff) arr.shift();
+  saveFuelEvents();
+}
+
+function recordFuelPoint(unit, fuel, atISO, loc) {
   if (!unit || typeof fuel !== "number") return;
   const t = atISO ? new Date(atISO).getTime() : Date.now();
   if (!Number.isFinite(t)) return;
   const arr = (fuelSeries[unit] = fuelSeries[unit] || []);
   const last = arr[arr.length - 1];
+  // Checked before the near-duplicate skip below, though a fill is far too big
+  // a jump to be caught by it.
+  if (last && fuel - last[1] >= FILL_MIN_PCT) recordFill(unit, t, last[1], fuel, loc);
   // skip near-duplicate readings (keeps the series compact, still catches jumps)
   if (last && Math.abs(last[0] - t) < 10 * 60000 && Math.abs(last[1] - fuel) < 0.5) return;
   arr.push([t, fuel]);
@@ -682,7 +728,7 @@ function mapFleet(raw) {
         fuelHist[unit] = { fuel, at: fuelAt };
         dirty = true;
       }
-      recordFuelPoint(unit, fuel, fuelAt);
+      recordFuelPoint(unit, fuel, fuelAt, loc);
     } else if (fuelHist[unit]) {
       // Parked / engine off: fall back to the last value we ever saw.
       fuel = fuelHist[unit].fuel;
@@ -797,7 +843,7 @@ function ingestWebhookFuel(p) {
     const f = Math.round(pct * 10) / 10;
     fuelHist[unit] = { fuel: f, at: p.located_at || new Date().toISOString() };
     saveFuelHist();
-    recordFuelPoint(unit, f, p.located_at);
+    recordFuelPoint(unit, f, p.located_at, p);
   }
 }
 
@@ -1467,6 +1513,8 @@ async function initDurable() {
     }
     const o = await ghLoad("odo_daily.json");
     if (o && typeof o === "object") odoDaily = o;
+    const fe = await ghLoad("fuel_events.json");
+    if (fe && typeof fe === "object" && !Array.isArray(fe)) fuelEvents = fe;
     const as = await ghLoad("assignments.json");
     if (as && typeof as === "object" && !Array.isArray(as)) { assignments = as; migrateAssignments(); }
     const tp = await ghLoad("toll_points.json");
