@@ -143,7 +143,7 @@
       const wb = XLSX.read(buf, { type: "array" });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: false });
-      const { txns, skipped, reason } = parseSheet(rows);
+      const { txns, skipped, skippedByItem, reason } = parseSheet(rows);
       if (!txns.length) {
         state.textContent = reason || "yoqilg'i xaridlari topilmadi";
         state.className = "dir-draft-state bad";
@@ -161,7 +161,14 @@
       $("#audit-copy").hidden = false;
       $("#audit-csv").hidden = false;
       render(j.rows, j.summary, j.history);
-      state.textContent = `${file.name} · ${txns.length} xarid · ${skipped} qator yoqilg'i emas`;
+      // Spell out what was left out. "58 rows skipped" hides the one question
+      // worth asking of an unfamiliar export: was any of it actually fuel?
+      const breakdown = Object.entries(skippedByItem || {})
+        .sort((x, y) => y[1] - x[1])
+        .map(([code, n]) => `${code} ${n}`)
+        .join(", ");
+      state.textContent = `${file.name} · ${txns.length} xarid o'qildi` +
+        (skipped ? ` · yoqilg'i deb hisoblanmadi: ${breakdown}` : "");
     } catch (e) {
       state.textContent = "Xato: " + e.message;
       state.className = "dir-draft-state bad";

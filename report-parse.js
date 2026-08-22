@@ -63,7 +63,7 @@ function toISO(date, time) {
 }
 
 function parseSheet(rows) {
-  if (!rows.length) return { txns: [], skipped: 0, reason: "fayl bo'sh" };
+  if (!rows.length) return { txns: [], skipped: 0, skippedByItem: {}, reason: "fayl bo'sh" };
   // The header is not always the first row — some exports put a title above.
   let headerAt = 0, col = findColumns(rows[0]);
   for (let i = 0; i < Math.min(rows.length, 10) && (col.unit == null || col.gallons == null); i++) {
@@ -71,20 +71,25 @@ function parseSheet(rows) {
     if (c.unit != null && c.gallons != null) { col = c; headerAt = i; break; }
   }
   if (col.unit == null || col.gallons == null || col.date == null) {
-    return { txns: [], skipped: 0, reason: "ustunlar topilmadi (Unit, Tran Date, Qty kerak)" };
+    return { txns: [], skipped: 0, skippedByItem: {}, reason: "ustunlar topilmadi (Unit, Tran Date, Qty kerak)" };
   }
 
   const txns = [];
   let skipped = 0;
+  // What was left out, by product code. Every card provider names its products
+  // differently, so a code that is really truck diesel could be sitting in here
+  // being quietly ignored. That has to be visible rather than assumed.
+  const skippedByItem = {};
+  const bump = (code) => { const k = code || "(bo'sh)"; skippedByItem[k] = (skippedByItem[k] || 0) + 1; };
   for (let i = headerAt + 1; i < rows.length; i++) {
     const r = rows[i];
     if (!r || !r.length) continue;
     const item = String(col.item != null ? r[col.item] : "ULSD").trim().toUpperCase();
-    if (col.item != null && !FUEL_ITEMS.has(item)) { skipped++; continue; }
+    if (col.item != null && !FUEL_ITEMS.has(item)) { skipped++; bump(item); continue; }
     const gallons = Number(r[col.gallons]);
     const unit = normUnit(r[col.unit]);
     const at = toISO(r[col.date], col.time != null ? r[col.time] : "");
-    if (!unit || !at || !(gallons > 0)) { skipped++; continue; }
+    if (!unit || !at || !(gallons > 0)) { skipped++; bump(`${item} (raqam yoki sana yo'q)`); continue; }
     txns.push({
       unit, at, gallons: Math.round(gallons * 10) / 10,
       station: String(col.station != null ? r[col.station] || "" : "").trim(),
@@ -94,7 +99,7 @@ function parseSheet(rows) {
       invoice: String(col.invoice != null ? r[col.invoice] || "" : "").trim(),
     });
   }
-  return { txns, skipped, reason: "" };
+  return { txns, skipped, skippedByItem, reason: "" };
 }
 
   return { parseSheet, findColumns, normUnit, toISO, FUEL_ITEMS, HEADERS };

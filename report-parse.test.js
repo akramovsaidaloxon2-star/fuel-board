@@ -62,6 +62,12 @@ if (!fs.existsSync(fixture)) {
   const tenB = r.txns.filter((t) => t.unit === "010").length;
   eq(tenA > 0 && tenB > 0, true, `0010 (${tenA} qator) va 010 (${tenB} qator) alohida qoldi`);
 
+  // The one question an unfamiliar export raises: was any of the skipped part
+  // actually fuel? The answer has to be on screen, not inferred.
+  eq(r.skippedByItem.DEFD, 210, "DEFD alohida sanaladi");
+  eq(r.skippedByItem.SCLE, 151, "SCLE alohida sanaladi");
+  eq(Object.values(r.skippedByItem).reduce((a, b) => a + b, 0), r.skipped, "hisob to'g'ri keladi");
+
   const units = new Set(r.txns.map((t) => t.unit));
   console.log(`  ${units.size} unit · namuna: ${[...units].slice(0, 6).join(", ")}`);
   console.log(`  birinchi qator: ${JSON.stringify(r.txns[0])}`);
