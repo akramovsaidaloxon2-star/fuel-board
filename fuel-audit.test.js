@@ -46,10 +46,18 @@ eq(r2.rows[2].verdict, "suspicious", "quyish qayd etilmagan — shubhali");
 eq(r2.rows[2].missingGal, 120, "butun miqdor hisobga tushmagan");
 
 console.log("\n=== 4. Kvitansiyasiz quyish");
+// Hisobot qamragan kunlar ichidagi quyish — ko'rsatiladi
 const r3 = a.auditReport(
   [txn("1399", 3, 8, 100), txn("1399", 6, 9, 87)],
-  { 1399: [fill(3, 8, 20, 100), fill(6, 9, 30, 100), fill(9, 7, 40, 95)] });
+  { 1399: [fill(3, 8, 20, 100), fill(6, 9, 30, 100), fill(6, 20, 40, 95)] });
 eq(r3.rows[2].verdict, "unpaid", "bak ko'tarilgan, lekin hisobotda xarid yo'q");
+
+// Hisobotdan tashqaridagi kun — ko'rsatilmaydi. Kunlik fayl yuklaganda
+// oylab to'plangan quyishlar ro'yxatni bosib ketmasligi uchun.
+const outside = a.auditReport(
+  [txn("1399", 3, 8, 100), txn("1399", 3, 20, 87)],
+  { 1399: [fill(3, 8, 20, 100), fill(3, 20, 30, 100), fill(9, 7, 40, 95)] });
+eq(outside.summary.unpaid, 0, "boshqa kundagi quyish ro'yxatga tushmaydi");
 
 console.log("\n=== 5. Xato ayblov chiqmasligi kerak");
 // Sensor sal xato: bir xil bak, kichik farqlar — hammasi normal deb qolishi kerak.
@@ -121,6 +129,21 @@ const covered = a.auditReport(
   [txn("1399", 10, 8, 100), txn("1399", 11, 8, 87), txn("1399", 12, 8, 120)],
   { 1399: [fill(10, 8, 20, 100), fill(11, 8, 30, 100)] });
 eq(covered.rows[2].verdict, "suspicious", "tarix ichida quyish yo'q — shubhali");
+
+console.log("\n=== 10. Kunlik fayl: o'lchov oldingi kunlardan olinadi");
+// Bugungi bitta xarid. O'zicha o'lchov yo'q — lekin oldingi kunlar saqlangan.
+const today = [txn("1399", 14, 9, 150, "TA Gary")];
+const earlier = [txn("1399", 3, 8, 100), txn("1399", 6, 9, 87), txn("1399", 10, 8, 94)];
+const fillsAll = [fill(3, 8, 20, 100), fill(6, 9, 30, 100), fill(10, 8, 25, 100), fill(14, 9, 35, 100)];
+
+const alone = a.auditReport(today, { 1399: fillsAll });
+eq(alone.rows[0].verdict, "unknown", "tarixsiz — bitta xariddan xulosa chiqmaydi");
+
+const withPrior = a.auditReport(today, { 1399: fillsAll }, { priorTxns: earlier });
+eq(withPrior.rows.length, 1, "faqat bugungi qator qaytariladi");
+eq(withPrior.rows[0].verdict, "suspicious", "oldingi kunlar o'lchov berdi — firibgarlik ko'rindi");
+eq(withPrior.rows[0].missingGal, 69, "69 gallon hisobga tushmagan");
+eq(withPrior.rows[0].baselineGal, 125, "o'lchov oldingi quyishlardan");
 
 console.log(fail ? `\n${fail} ta xato` : "\nHammasi o'tdi");
 process.exit(fail ? 1 : 0);

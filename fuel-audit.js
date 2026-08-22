@@ -114,6 +114,10 @@ function auditUnit(unit, txns, fills, opts) {
       st: txn.st || "",
       driver: txn.driver || "",
       rise,
+      // Where the needle started and ended, not just how far it moved: "30 ->
+      // 80" is what a person checks the gallons against.
+      from: fill ? fill.from : null,
+      to: fill ? fill.to : null,
       impliedGal: capacity == null ? null : Math.round(capacity),
       baselineGal: baseline == null ? null : Math.round(baseline),
       baselineFrom,
@@ -123,6 +127,9 @@ function auditUnit(unit, txns, fills, opts) {
       verdict: "ok",
       reason: "",
       missingGal: null,
+      // Carried-over purchases hold the baseline up but were already reported
+      // when their own file was uploaded.
+      reported: txn.reported !== false,
     };
 
     if (!fill) {
@@ -172,26 +179,33 @@ function auditUnit(unit, txns, fills, opts) {
   }
 
   // Fills nobody paid for on this card: not fraud on its own — cash, another
-  // card, or a week boundary — but it belongs in the same picture.
+  // card, or a second fuel provider whose file was not uploaded — but it
+  // belongs in the same picture. Only within the days the report covers.
   for (let i = 0; i < list.length; i++) {
     if (usedIds.has(i)) continue;
     const f = list[i];
     const rise = +(f.to - f.from).toFixed(1);
     if (rise < MIN_PCT_RISE) continue;
+    const ft = timeOf(f.at);
+    if (o.span && Number.isFinite(ft) && (ft < o.span.from || ft > o.span.to)) continue;
     rows.push({
       unit, at: f.at, gallons: null, station: "",
-      rise, impliedGal: null,
+      rise, from: f.from, to: f.to, impliedGal: null,
       baselineGal: baseline == null ? null : Math.round(baseline),
       baselineFrom, gapMin: null, lat: f.lat, lon: f.lon,
       verdict: "unpaid",
       reason: `bak ${rise}% ko'tarilgan, lekin hisobotda bunday xarid yo'q`,
       missingGal: null,
+      reported: true,
     });
   }
 
   rows.sort((a, b) => timeOf(a.at) - timeOf(b.at));
   return rows;
 }
+
+// Rows for purchases carried over from earlier uploads are not shown again:
+// they were reported when they arrived, and are here only to hold the baseline.
 
 // Card reports timestamp a purchase in the station's local time; the fills are
 // recorded in UTC. Rather than ask which timezone a report is in — the answer
@@ -226,17 +240,36 @@ function estimateOffsetMs(txns, events) {
 
 // txns: [{ unit, at, gallons, station? }] — one week of card lines.
 // events: { unit: [ {at, endAt, from, to, lat, lon} ] } — recorded fills.
+// txns are the lines being reported on now; opts.priorTxns are purchases seen
+// in earlier uploads. Both are paired against fills, because the measuring
+// stick — gallons per point of tank — is built from every purchase a truck has
+// ever had checked. Only the reported ones come back as rows: a single day's
+// file would otherwise have one purchase per truck, never the two it takes to
+// have a baseline at all, and would answer "no data" to everything.
 function auditReport(txns, events, opts) {
   const o = opts || {};
-  const tz = o.offsetMs == null ? estimateOffsetMs(txns, events) : { offsetMs: o.offsetMs, samples: null, hours: o.offsetMs / HOURS };
+  const reported = (txns || []).map((t) => ({ ...t, reported: true }));
+  const prior = (o.priorTxns || []).map((t) => ({ ...t, reported: false }));
+  const all = [...prior, ...reported];
+  // The offset is measured from the reported lines: they are the ones whose
+  // clock is in question, and prior lines were already shifted when stored.
+  const tz = o.offsetMs == null ? estimateOffsetMs(reported, events) : { offsetMs: o.offsetMs, samples: null, hours: o.offsetMs / HOURS };
   const byUnit = {};
-  for (const t of txns || []) {
+  for (const t of all) {
     const u = String(t.unit == null ? "" : t.unit).trim();
     if (!u || !(t.gallons > 0)) continue;
     // Shift the purchase onto the clock the fills were recorded on.
-    const shifted = tz.offsetMs ? { ...t, at: new Date(timeOf(t.at) + tz.offsetMs).toISOString(), localAt: t.at } : t;
+    const shifted = (tz.offsetMs && t.reported)
+      ? { ...t, at: new Date(timeOf(t.at) + tz.offsetMs).toISOString(), localAt: t.at }
+      : t;
     (byUnit[u] = byUnit[u] || []).push(shifted);
   }
+  // Fills outside the window the report covers belong to days nobody uploaded;
+  // listing them as unpaid would bury a one-day file in months of history.
+  const times = reported.map((t) => timeOf(t.at) + (tz.offsetMs || 0)).filter(Number.isFinite);
+  const span = times.length
+    ? { from: Math.min(...times) - 12 * HOURS, to: Math.max(...times) + 12 * HOURS }
+    : null;
   // Nothing before the first fill ever recorded can be judged, whichever unit
   // it belongs to: that is simply where the record starts.
   let historyFrom = o.historyFrom;
@@ -248,10 +281,10 @@ function auditReport(txns, events, opts) {
       }
     }
   }
-  const unitOpts = { ...o, historyFrom };
+  const unitOpts = { ...o, historyFrom, span };
   const rows = [];
   for (const u of Object.keys(byUnit)) {
-    rows.push(...auditUnit(u, byUnit[u], (events || {})[u] || [], unitOpts));
+    rows.push(...auditUnit(u, byUnit[u], (events || {})[u] || [], unitOpts).filter((r) => r.reported));
   }
   const counts = rows.reduce((a, r) => { a[r.verdict] = (a[r.verdict] || 0) + 1; return a; }, {});
   const missing = rows

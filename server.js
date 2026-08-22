@@ -523,6 +523,44 @@ async function resolveMapPoint(input) {
 }
 
 
+// --- Purchases already checked, kept so tomorrow has something to measure ---
+// A day's file holds one purchase per truck, and one purchase can never
+// establish gallons-per-point — it needs at least two. Storing what has been
+// audited lets each daily upload be measured against everything before it, so
+// the check sharpens instead of restarting every morning.
+const TXN_STORE = path.join(__dirname, "fuel_txns.json");
+let fuelTxns = {};
+try { fuelTxns = JSON.parse(fs.readFileSync(TXN_STORE, "utf8")); } catch { fuelTxns = {}; }
+let txnTimer = null;
+function saveFuelTxns() {
+  clearTimeout(txnTimer);
+  txnTimer = setTimeout(() => {
+    fs.writeFile(TXN_STORE, JSON.stringify(fuelTxns), () => {});
+    ghSave("fuel_txns.json", fuelTxns);
+  }, 3000);
+}
+const txnKey = (t) => (t.invoice ? `i:${t.invoice}` : `t:${t.at}|${t.gallons}`);
+// Re-uploading the same file must not double-count: an invoice number settles
+// it outright, and without one the time and gallons together are enough.
+function rememberTxns(rows) {
+  let added = 0;
+  const cutoff = Date.now() - 180 * 864e5;
+  for (const t of rows) {
+    const u = String(t.unit || "").trim();
+    if (!u || !(t.gallons > 0)) continue;
+    const arr = (fuelTxns[u] = fuelTxns[u] || []);
+    const key = txnKey(t);
+    if (arr.some((x) => txnKey(x) === key)) continue;
+    arr.push({ at: t.at, gallons: t.gallons, station: t.station || "", city: t.city || "",
+               st: t.st || "", driver: t.driver || "", invoice: t.invoice || "" });
+    added++;
+    const keep = arr.filter((x) => Date.parse(x.at) >= cutoff);
+    if (keep.length !== arr.length) fuelTxns[u] = keep;
+  }
+  if (added) saveFuelTxns();
+  return added;
+}
+
 // --- Units the audit should leave alone ---
 // A truck with a dead gauge, two tanks, or a reefer drawing off the same card
 // fails the arithmetic every single week. Without a way to set those aside the
@@ -1643,7 +1681,16 @@ const server = http.createServer(async (req, res) => {
     const kept = resolved.filter((t) => !skip.has(t.unit) && !skip.has(normUnitId(t.unit)));
     const events = {};
     for (const u of Object.keys(fuelEvents)) if (!skip.has(normUnitId(u))) events[u] = fuelEvents[u];
-    const out = audit.auditReport(kept, events);
+    // Everything this unit has had checked before, so a one-day file still has
+    // a measuring stick. Purchases in the file itself are not fed in twice.
+    const priorTxns = [];
+    const inFile = new Set(kept.map((t) => `${t.unit}|${txnKey(t)}`));
+    for (const u of new Set(kept.map((t) => t.unit))) {
+      for (const t of fuelTxns[u] || []) {
+        if (!inFile.has(`${u}|${txnKey(t)}`)) priorTxns.push({ ...t, unit: u });
+      }
+    }
+    const out = audit.auditReport(kept, events, { priorTxns });
     const loc = await checkLocations(out.rows);
     // How far back the fills go decides what can be judged at all, so it is
     // reported alongside: without it a page full of "unknown" looks broken
@@ -1664,6 +1711,7 @@ const server = http.createServer(async (req, res) => {
         ...out.summary,
         locChecked: loc.checked, locFar: loc.far, locPending: loc.pending,
         ignoredLines: resolved.length - kept.length, ignoredUnits: auditIgnore.length,
+        priorTxns: priorTxns.length, newTxns: rememberTxns(kept),
       },
       history: { fills, units: Object.keys(fuelEvents).length, since: earliest ? new Date(earliest).toISOString() : null },
     }));
@@ -1711,6 +1759,8 @@ async function initDurable() {
     }
     const o = await ghLoad("odo_daily.json");
     if (o && typeof o === "object") odoDaily = o;
+    const ft = await ghLoad("fuel_txns.json");
+    if (ft && typeof ft === "object" && !Array.isArray(ft)) fuelTxns = ft;
     const ai = await ghLoad("audit_ignore.json");
     if (Array.isArray(ai)) auditIgnore = ai;
     const sg = await ghLoad("station_geo.json");

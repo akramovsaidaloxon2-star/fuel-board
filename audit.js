@@ -37,7 +37,7 @@
         <td>${esc(r.unit)}</td>
         <td>${esc(when)}</td>
         <td class="num">${r.gallons == null ? "—" : r.gallons}</td>
-        <td class="num">${r.rise == null ? "—" : "+" + r.rise + "%"}</td>
+        <td class="num">${r.from == null ? "—" : `${r.from}→${r.to}%`}<div class="audit-rise">${r.rise == null ? "" : "+" + r.rise}</div></td>
         <td class="num">${r.impliedGal == null ? "—" : r.impliedGal}</td>
         <td class="num">${r.baselineGal == null ? "—" : r.baselineGal}</td>
         <td class="num">${r.missingGal == null ? "" : r.missingGal}</td>
@@ -72,11 +72,13 @@
   // Exporting matters more than it looks: acting on a flagged line means taking
   // it to whoever handles the driver, and that cannot be a screenshot.
   function asRows() {
-    const head = ["Xulosa", "Unit", "Driver", "Vaqt", "Gallon", "Bak %", "Bak taxmini", "Odatda", "Farq", "Masofa mi", "Zapravka", "Shahar", "Sabab"];
+    const head = ["Xulosa", "Unit", "Driver", "Vaqt", "Gallon", "Bak dan", "Bak gacha", "Ko'tarilish %", "Bak taxmini", "Odatda", "Farq", "Masofa mi", "Zapravka", "Shahar", "Sabab"];
     const body = (last.rows || []).map((r) => [
       (VERDICT[r.verdict] || {}).label || r.verdict,
       r.unit, r.driver || "", String(r.localAt || r.at).replace("T", " ").slice(0, 16),
       r.gallons == null ? "" : r.gallons,
+      r.from == null ? "" : r.from,
+      r.to == null ? "" : r.to,
       r.rise == null ? "" : r.rise,
       r.impliedGal == null ? "" : r.impliedGal,
       r.baselineGal == null ? "" : r.baselineGal,
