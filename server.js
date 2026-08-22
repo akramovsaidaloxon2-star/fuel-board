@@ -594,6 +594,78 @@ function resolveUnit(raw, known) {
   return cands.length === 1 ? cands[0] : s;
 }
 
+// --- Gallons against the road: does the mileage support the fuel? ---
+// The tank check answers "did it go in?". This answers a different question:
+// could the truck possibly have burned it? A tractor returns 5 to 8.5 miles
+// per gallon; loaded, in winter, in mountains, 4.5. Nothing burns 150 gallons
+// over 300 miles. Daily odometers reach back further than the fill records do,
+// so this works on weeks that predate them.
+const MPG_FLOOR = 3.5;        // below this the fuel cannot have gone into this truck
+const MPG_CEILING = 12;       // above it, purchases are missing rather than invented
+const MPG_MIN_MILES = 100;    // shorter runs are inside the daily odometer's error
+const MPG_MIN_GAL = 20;
+
+// The odometer nearest a given day, within a couple of days either side —
+// a truck that was parked or out of coverage has gaps.
+function odoNear(unit, iso) {
+  const days = odoDaily[unit];
+  if (!days) return null;
+  const target = Date.parse(String(iso).slice(0, 10));
+  if (!Number.isFinite(target)) return null;
+  let best = null, bestGap = Infinity;
+  for (const d of Object.keys(days)) {
+    const gap = Math.abs(Date.parse(d) - target);
+    if (gap <= 2 * 864e5 && gap < bestGap) { best = days[d]; bestGap = gap; }
+  }
+  return best;
+}
+
+// Rows arrive per unit and already in time order; prior purchases are not in
+// them, so the previous purchase comes from the stored history.
+function checkMileage(rows) {
+  let checked = 0, bad = 0;
+  const byUnit = {};
+  for (const r of rows) if (r.gallons > 0) (byUnit[r.unit] = byUnit[r.unit] || []).push(r);
+
+  for (const unit of Object.keys(byUnit)) {
+    // A file uploaded twice would otherwise sit next to its own stored copy,
+    // and every purchase would measure zero miles against itself.
+    const here = new Set(byUnit[unit].map((r) => `${r.localAt || r.at}|${r.gallons}`));
+    const stored = (fuelTxns[unit] || [])
+      .filter((t) => !here.has(`${t.at}|${t.gallons}`))
+      .map((t) => ({ at: t.at, gallons: t.gallons }));
+    const all = [...stored, ...byUnit[unit].map((r) => ({ at: r.at, gallons: r.gallons, row: r }))]
+      .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+    for (let i = 1; i < all.length; i++) {
+      const cur = all[i];
+      if (!cur.row) continue;                       // already reported on its own day
+      const prev = all[i - 1];
+      const a = odoNear(unit, prev.at), b = odoNear(unit, cur.at);
+      if (a == null || b == null) continue;
+      const miles = b - a;
+      if (!(miles >= MPG_MIN_MILES) || !(cur.gallons >= MPG_MIN_GAL)) continue;
+      const mpg = miles / cur.gallons;
+      cur.row.mpg = Math.round(mpg * 10) / 10;
+      cur.row.milesSince = Math.round(miles);
+      checked++;
+      if (mpg < MPG_FLOOR) {
+        bad++;
+        const note = `${Math.round(miles)} mil yurib ${cur.gallons} gal — ${mpg.toFixed(1)} MPG ` +
+          `(flot o'rtachasi ~7). Uzoq idle yoki reeferga quyilgan bo'lishi ham mumkin`;
+        if (cur.row.verdict === "ok" || cur.row.verdict === "unknown" || cur.row.verdict === "check") {
+          cur.row.verdict = "suspicious";
+          cur.row.reason = cur.row.reason ? `${cur.row.reason}; ${note}` : note;
+        } else {
+          cur.row.reason = `${cur.row.reason}; ${note}`;
+        }
+      } else if (mpg > MPG_CEILING && cur.row.verdict === "ok") {
+        cur.row.reason = `${Math.round(miles)} mil uchun atigi ${cur.gallons} gal — oradagi xarid yetishmayotgan bo'lishi mumkin`;
+      }
+    }
+  }
+  return { checked, bad };
+}
+
 // --- Station coordinates, learned once and kept ---
 // The audit asks whether the truck was anywhere near the station it was charged
 // at. That needs the station's position, and the report only gives a city and a
@@ -1671,11 +1743,18 @@ const server = http.createServer(async (req, res) => {
     }
     // Map every card line onto a unit the board actually knows before anything
     // is compared, so a padded number is not audited as a truck of its own.
-    let known = new Set(Object.keys(fuelEvents));
+    // Anything the board has ever recorded under a name is a unit by that name:
+    // fills, odometer days, and purchases already audited. The live fleet is
+    // added when Motive answers, but the check must not depend on it.
+    const known = new Set([
+      ...Object.keys(fuelEvents),
+      ...Object.keys(odoDaily),
+      ...Object.keys(fuelTxns),
+    ]);
     try {
       const data = await getFuelData();
       for (const t of data.fleet || []) if (t && t.unit) known.add(String(t.unit));
-    } catch { /* fills alone still resolve most of them */ }
+    } catch { /* the recorded names alone resolve most of them */ }
     const resolved = txns.map((t) => ({ ...t, unit: resolveUnit(t.unit, known) }));
     const skip = new Set(auditIgnore);
     const kept = resolved.filter((t) => !skip.has(t.unit) && !skip.has(normUnitId(t.unit)));
@@ -1692,6 +1771,14 @@ const server = http.createServer(async (req, res) => {
     }
     const out = audit.auditReport(kept, events, { priorTxns });
     const loc = await checkLocations(out.rows);
+    const mpg = checkMileage(out.rows);
+    // Both checks above can turn an "ok" row into a flagged one, so the counts
+    // are taken after them — otherwise the summary line contradicts the table
+    // sitting underneath it.
+    const counts = out.rows.reduce((a, r) => { a[r.verdict] = (a[r.verdict] || 0) + 1; return a; }, {});
+    const missingGal = out.rows
+      .filter((r) => r.verdict === "suspicious" && r.missingGal > 0)
+      .reduce((a, r) => a + r.missingGal, 0);
     // How far back the fills go decides what can be judged at all, so it is
     // reported alongside: without it a page full of "unknown" looks broken
     // rather than simply early.
@@ -1709,9 +1796,17 @@ const server = http.createServer(async (req, res) => {
       rows: out.rows,
       summary: {
         ...out.summary,
+        suspicious: counts.suspicious || 0,
+        unpaid: counts.unpaid || 0,
+        check: counts.check || 0,
+        unknown: counts.unknown || 0,
+        ok: counts.ok || 0,
+        missingGal,
         locChecked: loc.checked, locFar: loc.far, locPending: loc.pending,
         ignoredLines: resolved.length - kept.length, ignoredUnits: auditIgnore.length,
-        priorTxns: priorTxns.length, newTxns: rememberTxns(kept),
+        priorTxns: priorTxns.length,
+        mpgChecked: mpg.checked, mpgBad: mpg.bad,
+        newTxns: rememberTxns(kept),
       },
       history: { fills, units: Object.keys(fuelEvents).length, since: earliest ? new Date(earliest).toISOString() : null },
     }));

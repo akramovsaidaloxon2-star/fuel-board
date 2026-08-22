@@ -15,3 +15,9 @@ prices.json
 truck_raw.png
 truck_final.png
 _*.png
+# Runtime records the server keeps: fills, audited purchases, the
+# geocoded stations and the units held back from the audit.
+fuel_events.json
+fuel_txns.json
+station_geo.json
+audit_ignore.json

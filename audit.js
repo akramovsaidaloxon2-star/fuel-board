@@ -35,12 +35,14 @@
       return `<tr class="audit-${v.cls}">
         <td><span class="audit-chip ${v.cls}">${v.label}</span></td>
         <td>${esc(r.unit)}</td>
+        <td>${esc(r.driver || "")}</td>
         <td>${esc(when)}</td>
         <td class="num">${r.gallons == null ? "—" : r.gallons}</td>
         <td class="num">${r.from == null ? "—" : `${r.from}→${r.to}%`}<div class="audit-rise">${r.rise == null ? "" : "+" + r.rise}</div></td>
         <td class="num">${r.impliedGal == null ? "—" : r.impliedGal}</td>
         <td class="num">${r.baselineGal == null ? "—" : r.baselineGal}</td>
         <td class="num">${r.missingGal == null ? "" : r.missingGal}</td>
+        <td class="num">${r.mpg == null ? "—" : r.mpg}${r.milesSince == null ? "" : `<div class="audit-rise">${r.milesSince} mi</div>`}</td>
         <td class="num">${r.stationMi == null ? "—" : r.stationMi}</td>
         <td>${esc(r.station)} ${map}</td>
         <td class="audit-why">${esc(r.reason)}</td>
@@ -55,6 +57,7 @@
       (s.tzHours ? ` · vaqt farqi ${s.tzHours > 0 ? "+" : ""}${s.tzHours} soat` : "") +
       (s.locChecked ? ` · joylashuv tekshirildi: ${s.locChecked}${s.locFar ? `, mos kelmadi ${s.locFar}` : ""}` : "") +
       (s.locPending ? ` · ${s.locPending} zapravka keyingi safar aniqlanadi` : "") +
+      (s.mpgChecked ? ` · MPG tekshirildi: ${s.mpgChecked}${s.mpgBad ? `, imkonsiz ${s.mpgBad}` : ""}` : "") +
       (s.ignoredLines ? ` · ${s.ignoredLines} qator chetlab o'tildi` : "");
 
     // A wall of "no data" is the expected answer until the fills pile up; say
@@ -72,7 +75,7 @@
   // Exporting matters more than it looks: acting on a flagged line means taking
   // it to whoever handles the driver, and that cannot be a screenshot.
   function asRows() {
-    const head = ["Xulosa", "Unit", "Driver", "Vaqt", "Gallon", "Bak dan", "Bak gacha", "Ko'tarilish %", "Bak taxmini", "Odatda", "Farq", "Masofa mi", "Zapravka", "Shahar", "Sabab"];
+    const head = ["Xulosa", "Unit", "Driver", "Vaqt", "Gallon", "Bak dan", "Bak gacha", "Ko'tarilish %", "Bak taxmini", "Odatda", "Farq", "MPG", "Oradagi mil", "Masofa mi", "Zapravka", "Shahar", "Sabab"];
     const body = (last.rows || []).map((r) => [
       (VERDICT[r.verdict] || {}).label || r.verdict,
       r.unit, r.driver || "", String(r.localAt || r.at).replace("T", " ").slice(0, 16),
@@ -83,6 +86,8 @@
       r.impliedGal == null ? "" : r.impliedGal,
       r.baselineGal == null ? "" : r.baselineGal,
       r.missingGal == null ? "" : r.missingGal,
+      r.mpg == null ? "" : r.mpg,
+      r.milesSince == null ? "" : r.milesSince,
       r.stationMi == null ? "" : r.stationMi,
       r.station || "", [r.city, r.st].filter(Boolean).join(", "), r.reason || "",
     ]);
