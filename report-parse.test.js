@@ -13,10 +13,13 @@ const eq = (got, want, what) => {
 };
 
 console.log("=== 1. Unit raqamlari");
-eq(p.normUnit("0008"), "8", "0008 -> 8");
-eq(p.normUnit("010"), "10", "010 -> 10");
-eq(p.normUnit("0143"), "143", "0143 -> 143");
-eq(p.normUnit("#77"), "77", "#77 -> 77");
+eq(p.normUnit("0008"), "0008", "0008 o'z holicha qoladi");
+eq(p.normUnit("#77"), "77", "# belgisi olib tashlanadi");
+eq(p.normUnit(" 0143 "), "0143", "bo'shliq kesiladi");
+// Haqiqiy hisobotda 0010 (Anthony T Walker) va 010 (Brett Tousant) — ikki
+// boshqa truck. Ularni birlashtirish bittasining xaridini boshqasining baki
+// bilan solishtirishga olib kelardi.
+eq(p.normUnit("0010") !== p.normUnit("010"), true, "0010 va 010 ajralib turadi");
 
 console.log("\n=== 2. Sana va vaqt");
 eq(p.toISO("2026-08-15", "08:51"), "2026-08-15T08:51:00Z", "ISO ko'rinish");
@@ -55,8 +58,9 @@ if (!fs.existsSync(fixture)) {
 
   const badDate = r.txns.filter((t) => !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(t.at));
   eq(badDate.length, 0, "hamma sana o'girildi");
-  const padded = r.txns.filter((t) => /^0/.test(t.unit));
-  eq(padded.length, 0, "unit raqamlarida boshida nol qolmadi");
+  const tenA = r.txns.filter((t) => t.unit === "0010").length;
+  const tenB = r.txns.filter((t) => t.unit === "010").length;
+  eq(tenA > 0 && tenB > 0, true, `0010 (${tenA} qator) va 010 (${tenB} qator) alohida qoldi`);
 
   const units = new Set(r.txns.map((t) => t.unit));
   console.log(`  ${units.size} unit · namuna: ${[...units].slice(0, 6).join(", ")}`);

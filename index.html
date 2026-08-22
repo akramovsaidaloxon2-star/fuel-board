@@ -270,7 +270,16 @@
           <button class="btn primary" type="button" id="audit-btn">⬆️ Haftalik hisobotni yuklash (.xlsx / .csv)</button>
           <input type="file" id="audit-file" accept=".xls,.xlsx,.csv" hidden>
           <label class="toggle"><input type="checkbox" id="audit-only-bad"> Faqat shubhalilarni ko'rsatish</label>
+          <button class="btn" type="button" id="audit-copy" hidden>📋 Nusxa</button>
+          <button class="btn" type="button" id="audit-csv" hidden>⬇️ CSV</button>
           <span id="audit-state" class="dir-draft-state"></span>
+        </div>
+
+        <div class="dir-draft audit-ignore-row">
+          <label class="audit-ignore-label" for="audit-ignore">Tekshiruvdan chetlab o'tiladigan unitlar</label>
+          <input id="audit-ignore" placeholder="masalan: 1234, 5678 — buzuq sensor, ikkinchi bak, reefer" autocomplete="off">
+          <button class="btn" type="button" id="audit-ignore-save">Saqlash</button>
+          <span id="audit-ignore-state" class="dir-draft-state"></span>
         </div>
 
         <div id="audit-result" hidden>
@@ -281,7 +290,7 @@
               <thead><tr>
                 <th>Xulosa</th><th>Unit</th><th>Vaqt</th><th class="num">Gallon</th>
                 <th class="num">Bak</th><th class="num">Bak≈</th><th class="num">Odatda</th>
-                <th class="num">Farq</th><th>Zapravka</th><th>Sabab</th>
+                <th class="num">Farq</th><th class="num">Masofa</th><th>Zapravka</th><th>Sabab</th>
               </tr></thead>
               <tbody id="audit-rows"></tbody>
             </table>
@@ -322,7 +331,9 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- Served from here rather than a CDN: the spreadsheet upload is useless
+       without it, and a blocked or slow CDN fails as "XLSX is not defined". -->
+  <script src="vendor/xlsx.full.min.js"></script>
   <script src="data.js"></script>
   <script src="app.js"></script>
   <script src="directions.js"></script>

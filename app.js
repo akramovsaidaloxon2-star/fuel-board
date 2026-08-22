@@ -704,6 +704,8 @@ function setupTabs() {
       $("#view-map").classList.toggle("hidden", view !== "map");
       const dirView = $("#view-directions");
       if (dirView) dirView.classList.toggle("hidden", view !== "directions");
+      const auditView = $("#view-audit");
+      if (auditView) auditView.classList.toggle("hidden", view !== "audit");
       if (view === "coverage") renderCoverage();
       if (view === "idle") renderIdle();
       if (view === "map") renderMap();

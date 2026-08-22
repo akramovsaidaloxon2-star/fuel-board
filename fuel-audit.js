@@ -107,8 +107,12 @@ function auditUnit(unit, txns, fills, opts) {
     const row = {
       unit,
       at: txn.at,
+      localAt: txn.localAt || txn.at,
       gallons: txn.gallons,
       station: txn.station || "",
+      city: txn.city || "",
+      st: txn.st || "",
+      driver: txn.driver || "",
       rise,
       impliedGal: capacity == null ? null : Math.round(capacity),
       baselineGal: baseline == null ? null : Math.round(baseline),

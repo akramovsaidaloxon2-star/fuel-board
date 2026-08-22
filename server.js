@@ -522,6 +522,110 @@ async function resolveMapPoint(input) {
   return { ...pt, label: label.slice(0, 60) };
 }
 
+
+// --- Units the audit should leave alone ---
+// A truck with a dead gauge, two tanks, or a reefer drawing off the same card
+// fails the arithmetic every single week. Without a way to set those aside the
+// list fills up with the same known-explained rows and stops being read.
+const IGNORE_STORE = path.join(__dirname, "audit_ignore.json");
+let auditIgnore = [];
+try { auditIgnore = JSON.parse(fs.readFileSync(IGNORE_STORE, "utf8")); } catch { auditIgnore = []; }
+if (!Array.isArray(auditIgnore)) auditIgnore = [];
+function saveAuditIgnore() {
+  fs.writeFile(IGNORE_STORE, JSON.stringify(auditIgnore), () => {});
+  ghSave("audit_ignore.json", auditIgnore);
+}
+const normUnitId = (v) => {
+  const s = String(v == null ? "" : v).trim().replace(/^#/, "");
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) ? String(n) : s;
+};
+
+// Which fleet unit a card line belongs to. The export writes the number the way
+// whoever set the card up typed it, so "0010" and "010" both turn up — and in a
+// real week they were two different trucks. An exact match wins; a padded form
+// is accepted only when exactly one fleet unit could have produced it, and
+// anything still ambiguous is left as written rather than guessed onto a truck.
+function resolveUnit(raw, known) {
+  const s = String(raw == null ? "" : raw).trim().replace(/^#/, "");
+  if (!s || known.has(s)) return s;
+  const n = normUnitId(s);
+  if (known.has(n)) return n;
+  const cands = [];
+  for (const k of known) if (normUnitId(k) === n) cands.push(k);
+  return cands.length === 1 ? cands[0] : s;
+}
+
+// --- Station coordinates, learned once and kept ---
+// The audit asks whether the truck was anywhere near the station it was charged
+// at. That needs the station's position, and the report only gives a city and a
+// state. Geocoding 400 lines a week would be both slow and rude to a free
+// service, so each city is looked up once and remembered — by the second week
+// almost everything is already known.
+const STATION_STORE = path.join(__dirname, "station_geo.json");
+let stationGeo = {};
+try { stationGeo = JSON.parse(fs.readFileSync(STATION_STORE, "utf8")); } catch { stationGeo = {}; }
+function saveStationGeo() {
+  fs.writeFile(STATION_STORE, JSON.stringify(stationGeo), () => {});
+  ghSave("station_geo.json", stationGeo);
+}
+// A city centre is not the truck stop — those sit out by the interstate, and in
+// a large metro that is a long way from downtown. The distance only has to
+// catch a card used in another state, so it is deliberately generous.
+const STATION_FAR_MI = 60;
+const GEOCODE_BUDGET = 60;      // new lookups per upload; the rest wait a week
+
+async function stationPoint(city, st, budget) {
+  const key = `${String(city || "").trim().toUpperCase()}|${String(st || "").trim().toUpperCase()}`;
+  if (key === "|") return null;
+  if (Object.prototype.hasOwnProperty.call(stationGeo, key)) return stationGeo[key];
+  if (budget.left <= 0 || budget.misses >= 3) return undefined;   // not looked up, not "no such place"
+  budget.left--;
+  const hit = await geocodePlace(`${city}, ${st}`);
+  if (!hit) {
+    // A geocoder that is down answers every lookup the same way, and each answer
+    // costs the full timeout. Three in a row and the rest of the upload waits
+    // for another day rather than making the operator sit through sixty of them.
+    budget.misses++;
+    if (budget.misses >= 3) return undefined;
+  } else {
+    budget.misses = 0;
+  }
+  stationGeo[key] = hit ? { lat: hit.lat, lon: hit.lon } : null;
+  budget.dirty = true;
+  return stationGeo[key];
+}
+
+// Adds the "was the truck there?" question to rows that already have an answer
+// about the gallons.
+async function checkLocations(rows) {
+  const budget = { left: GEOCODE_BUDGET, dirty: false, misses: 0 };
+  let checked = 0, far = 0, pending = 0;
+  for (const r of rows) {
+    if (r.lat == null || !r.city) continue;
+    const pt = await stationPoint(r.city, r.st, budget);
+    if (pt === undefined) { pending++; continue; }
+    if (!pt) continue;                            // city could not be placed
+    const mi = Math.round(haversineMiles(r.lat, r.lon, pt.lat, pt.lon));
+    r.stationMi = mi;
+    checked++;
+    if (mi > STATION_FAR_MI) {
+      far++;
+      const note = `truck quyish paytida ${r.city}, ${r.st} dan ${mi} mil narida edi`;
+      // A gallons verdict is the stronger finding; the distance is added to it
+      // rather than replacing it.
+      if (r.verdict === "ok" || r.verdict === "unknown" || r.verdict === "check") {
+        r.verdict = "suspicious";
+        r.reason = r.reason ? `${r.reason}; ${note}` : note;
+      } else {
+        r.reason = `${r.reason}; ${note}`;
+      }
+    }
+  }
+  if (budget.dirty) saveStationGeo();
+  return { checked, far, pending };
+}
+
 // --- Written route note ("#DIRECTION") from a Google Maps link ---
 // Dispatch writes these by hand today: which interstates the driver takes and
 // which numbered exit joins the next one. The routing engine already knows the
@@ -848,7 +952,12 @@ function serveStatic(req, res) {
     if (err) { res.writeHead(404); res.end("Not found"); return; }
     res.writeHead(200, {
       "Content-Type": MIME[path.extname(filePath)] || "text/plain",
-      "Cache-Control": "no-cache, must-revalidate",
+      // The board's own files must never be stale after a deploy. The vendored
+      // library is a different matter: it is nearly a megabyte and only changes
+      // when it is deliberately replaced.
+      "Cache-Control": url.startsWith("/vendor/")
+        ? "public, max-age=604800"
+        : "no-cache, must-revalidate",
     });
     res.end(data);
   });
@@ -1502,6 +1611,18 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
+  if (req.url === "/api/audit-ignore") {
+    if (req.method === "POST") {
+      const body = (await readBody(req)) || {};
+      const list = Array.isArray(body.units) ? body.units : [];
+      auditIgnore = [...new Set(list.map(normUnitId).filter(Boolean))].sort();
+      saveAuditIgnore();
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, units: auditIgnore }));
+    return;
+  }
+
   if (req.url === "/api/fuel-audit" && req.method === "POST") {
     const body = (await readBody(req)) || {};
     const txns = Array.isArray(body.txns) ? body.txns : [];
@@ -1510,7 +1631,20 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ ok: false, error: "hisobotda yoqilg'i xaridlari topilmadi" }));
       return;
     }
-    const out = audit.auditReport(txns, fuelEvents);
+    // Map every card line onto a unit the board actually knows before anything
+    // is compared, so a padded number is not audited as a truck of its own.
+    let known = new Set(Object.keys(fuelEvents));
+    try {
+      const data = await getFuelData();
+      for (const t of data.fleet || []) if (t && t.unit) known.add(String(t.unit));
+    } catch { /* fills alone still resolve most of them */ }
+    const resolved = txns.map((t) => ({ ...t, unit: resolveUnit(t.unit, known) }));
+    const skip = new Set(auditIgnore);
+    const kept = resolved.filter((t) => !skip.has(t.unit) && !skip.has(normUnitId(t.unit)));
+    const events = {};
+    for (const u of Object.keys(fuelEvents)) if (!skip.has(normUnitId(u))) events[u] = fuelEvents[u];
+    const out = audit.auditReport(kept, events);
+    const loc = await checkLocations(out.rows);
     // How far back the fills go decides what can be judged at all, so it is
     // reported alongside: without it a page full of "unknown" looks broken
     // rather than simply early.
@@ -1526,7 +1660,11 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
       ok: true,
       rows: out.rows,
-      summary: out.summary,
+      summary: {
+        ...out.summary,
+        locChecked: loc.checked, locFar: loc.far, locPending: loc.pending,
+        ignoredLines: resolved.length - kept.length, ignoredUnits: auditIgnore.length,
+      },
       history: { fills, units: Object.keys(fuelEvents).length, since: earliest ? new Date(earliest).toISOString() : null },
     }));
     return;
@@ -1573,6 +1711,10 @@ async function initDurable() {
     }
     const o = await ghLoad("odo_daily.json");
     if (o && typeof o === "object") odoDaily = o;
+    const ai = await ghLoad("audit_ignore.json");
+    if (Array.isArray(ai)) auditIgnore = ai;
+    const sg = await ghLoad("station_geo.json");
+    if (sg && typeof sg === "object" && !Array.isArray(sg)) stationGeo = sg;
     const fe = await ghLoad("fuel_events.json");
     if (fe && typeof fe === "object" && !Array.isArray(fe)) { fuelEvents = fe; pruneFuelEvents(); }
     const as = await ghLoad("assignments.json");

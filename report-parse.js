@@ -39,11 +39,13 @@ function findColumns(headerRow) {
   return col;
 }
 
-// "0008" and "010" are the same trucks the board calls 8 and 10.
+// Kept as written, minus a leading "#". Stripping the padding here looked
+// harmless until a real export turned up 0010 and 010 as two trucks with two
+// different drivers — collapsing both to "10" weighs one truck's purchases
+// against the other truck's tank. Which fleet unit a card entry belongs to is
+// the server's decision; only it knows what the units are really called.
 function normUnit(v) {
-  const s = String(v == null ? "" : v).trim().replace(/^#/, "");
-  const n = parseInt(s, 10);
-  return Number.isFinite(n) ? String(n) : s;
+  return String(v == null ? "" : v).trim().replace(/^#/, "");
 }
 
 // "2026-08-15" + "08:51" in the station's local time; the server works out

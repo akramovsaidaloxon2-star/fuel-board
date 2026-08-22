@@ -41,6 +41,7 @@
         <td class="num">${r.impliedGal == null ? "—" : r.impliedGal}</td>
         <td class="num">${r.baselineGal == null ? "—" : r.baselineGal}</td>
         <td class="num">${r.missingGal == null ? "" : r.missingGal}</td>
+        <td class="num">${r.stationMi == null ? "—" : r.stationMi}</td>
         <td>${esc(r.station)} ${map}</td>
         <td class="audit-why">${esc(r.reason)}</td>
       </tr>`;
@@ -51,7 +52,10 @@
       `<b>${s.lines}</b> qator · <b class="bad">${s.suspicious}</b> shubhali · ` +
       `<b>${s.unpaid}</b> kvitansiyasiz · <b>${s.check}</b> tekshirish kerak · <b>${s.ok}</b> to'g'ri` +
       (s.missingGal ? ` · <b class="bad">${s.missingGal} gal</b> hisobga tushmagan` : "") +
-      (s.tzHours ? ` · vaqt farqi ${s.tzHours > 0 ? "+" : ""}${s.tzHours} soat` : "");
+      (s.tzHours ? ` · vaqt farqi ${s.tzHours > 0 ? "+" : ""}${s.tzHours} soat` : "") +
+      (s.locChecked ? ` · joylashuv tekshirildi: ${s.locChecked}${s.locFar ? `, mos kelmadi ${s.locFar}` : ""}` : "") +
+      (s.locPending ? ` · ${s.locPending} zapravka keyingi safar aniqlanadi` : "") +
+      (s.ignoredLines ? ` · ${s.ignoredLines} qator chetlab o'tildi` : "");
 
     // A wall of "no data" is the expected answer until the fills pile up; say
     // so plainly instead of letting it read as a broken page.
@@ -62,6 +66,73 @@
         `Har bir unit uchun kamida 2 ta oldingi quyish kerak — bir haftadan keyin to'liq ishlaydi.`;
       note.classList.remove("hidden");
     } else note.classList.add("hidden");
+  }
+
+
+  // Exporting matters more than it looks: acting on a flagged line means taking
+  // it to whoever handles the driver, and that cannot be a screenshot.
+  function asRows() {
+    const head = ["Xulosa", "Unit", "Driver", "Vaqt", "Gallon", "Bak %", "Bak taxmini", "Odatda", "Farq", "Masofa mi", "Zapravka", "Shahar", "Sabab"];
+    const body = (last.rows || []).map((r) => [
+      (VERDICT[r.verdict] || {}).label || r.verdict,
+      r.unit, r.driver || "", String(r.localAt || r.at).replace("T", " ").slice(0, 16),
+      r.gallons == null ? "" : r.gallons,
+      r.rise == null ? "" : r.rise,
+      r.impliedGal == null ? "" : r.impliedGal,
+      r.baselineGal == null ? "" : r.baselineGal,
+      r.missingGal == null ? "" : r.missingGal,
+      r.stationMi == null ? "" : r.stationMi,
+      r.station || "", [r.city, r.st].filter(Boolean).join(", "), r.reason || "",
+    ]);
+    return [head, ...body];
+  }
+
+  async function copyTable(btn) {
+    const text = asRows().map((r) => r.join("\t")).join("\n");
+    try { await navigator.clipboard.writeText(text); }
+    catch { return; }
+    const old = btn.textContent;
+    btn.textContent = "✓ Olindi";
+    setTimeout(() => (btn.textContent = old), 1500);
+  }
+
+  function downloadCsv() {
+    const csv = asRows()
+      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+      .join("\r\n");
+    // Excel opens a CSV as ASCII unless the byte-order mark says otherwise, and
+    // then every Uzbek word in it is mangled.
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `fuel-audit-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  }
+
+  async function loadIgnore() {
+    try {
+      const j = await (await fetch("/api/audit-ignore")).json();
+      $("#audit-ignore").value = (j.units || []).join(", ");
+    } catch { /* the box just stays empty */ }
+  }
+
+  async function saveIgnore(btn) {
+    const units = $("#audit-ignore").value.split(/[,\s]+/).filter(Boolean);
+    btn.disabled = true;
+    try {
+      const j = await (await fetch("/api/audit-ignore", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ units }),
+      })).json();
+      $("#audit-ignore").value = (j.units || []).join(", ");
+      $("#audit-ignore-state").textContent = `${(j.units || []).length} ta unit chetlab o'tiladi`;
+      $("#audit-ignore-state").className = "dir-draft-state";
+    } catch (e) {
+      $("#audit-ignore-state").textContent = "saqlanmadi: " + e.message;
+      $("#audit-ignore-state").className = "dir-draft-state bad";
+    } finally { btn.disabled = false; }
   }
 
   async function handleFile(file) {
@@ -87,6 +158,8 @@
       if (!j.ok) { state.textContent = j.error || "tekshirib bo'lmadi"; state.className = "dir-draft-state bad"; return; }
       last = { rows: j.rows, summary: j.summary, history: j.history };
       $("#audit-result").hidden = false;
+      $("#audit-copy").hidden = false;
+      $("#audit-csv").hidden = false;
       render(j.rows, j.summary, j.history);
       state.textContent = `${file.name} · ${txns.length} xarid · ${skipped} qator yoqilg'i emas`;
     } catch (e) {
@@ -103,5 +176,9 @@
     $("#audit-only-bad").addEventListener("change", () => {
       if (last.rows.length) render(last.rows, last.summary, last.history);
     });
+    $("#audit-copy").addEventListener("click", (e) => copyTable(e.currentTarget));
+    $("#audit-csv").addEventListener("click", downloadCsv);
+    $("#audit-ignore-save").addEventListener("click", (e) => saveIgnore(e.currentTarget));
+    loadIgnore();
   };
 })();
