@@ -306,4 +306,24 @@ function auditReport(txns, events, opts) {
   };
 }
 
-module.exports = { auditReport, auditUnit, impliedCapacity, estimateOffsetMs, median, MATCH_WINDOW_MS, TOLERANCE };
+// How big this truck's tank is, in the only terms anyone ever measures: the
+// gallons it took to move the gauge. Same pairing the audit uses, so a stop
+// alert quotes the very number the audit would judge that purchase against.
+// Null until the truck has a couple of matched fills to its name.
+function estimateCapacity(txns, fills) {
+  const list = (fills || []).slice().sort((a, b) => timeOf(a.at) - timeOf(b.at));
+  const used = new Set();
+  const samples = [];
+  for (const t of (txns || []).slice().sort((a, b) => timeOf(a.at) - timeOf(b.at))) {
+    const m = matchFill(t, list, used);
+    if (!m) continue;
+    used.add(m.index);
+    const rise = +(m.fill.to - m.fill.from).toFixed(1);
+    if (rise < MIN_PCT_RISE) continue;
+    const cap = impliedCapacity(t.gallons, rise);
+    if (cap) samples.push(cap);
+  }
+  return samples.length >= MIN_SAMPLES ? Math.round(median(samples)) : null;
+}
+
+module.exports = { auditReport, auditUnit, impliedCapacity, estimateCapacity, estimateOffsetMs, median, MATCH_WINDOW_MS, TOLERANCE };

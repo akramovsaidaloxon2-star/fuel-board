@@ -338,6 +338,7 @@ function migrateAssignments() {
       // every truck that pulled in hours ago.
       const next = { brand: v.brand || "pilot", num: normNum(v.num) };
       if (v.arrivedAt) next.arrivedAt = v.arrivedAt;
+      if (v.arrivedFuel != null) next.arrivedFuel = v.arrivedFuel;
       assignments[u] = next;
     }
     else delete assignments[u];
@@ -1942,6 +1943,37 @@ async function runTollWatch() {
 // doing something else.
 const ARRIVE_MI = 3;         // same distance the board calls arrived
 const ARRIVE_CLEAR_MI = 15;  // far enough away to count as a new approach
+// A gauge wanders a point or two while a truck manoeuvres; three says fuel
+// actually went in. Below it, the truck left the stop as full as it arrived.
+const FUELED_MIN_PCT = 3;
+
+// How many gallons to put in: the standing limit for the unit when there is
+// one, and what the tank has room for — its measured capacity against the
+// level it rolled in on. Dispatch should not have to work this out at the pump.
+function fillAdvice(unit, truck) {
+  const lines = [];
+  if (truck.gallonLimit) lines.push(`Limit: <b>${truck.gallonLimit} gal</b>`);
+  const cap = audit.estimateCapacity(fuelTxns[unit] || [], fuelEvents[unit] || []);
+  if (cap && truck.fuel != null) {
+    const room = Math.round((cap * (100 - truck.fuel)) / 100);
+    if (room > 0) lines.push(`To'ldirish uchun: <b>~${room} gal</b> (bak ~${cap} gal)`);
+  }
+  return lines.length ? "\n" + lines.join("\n") : "";
+}
+
+// Leaving a stop it was sent to with a tank no fuller than it came in on: the
+// stop was passed. Checked wherever an approach ends — a truck already a
+// hundred miles down the road has left just the same, and that branch skips
+// the road-distance call, so it would otherwise clear the approach in silence
+// and the miss would never be reported.
+async function reportIfMissed(unit, a, truck, stop, driver, milesAway) {
+  const rose = (truck.fuel != null && a.arrivedFuel != null) ? truck.fuel - a.arrivedFuel : null;
+  if (rose == null || rose >= FUELED_MIN_PCT) return;
+  const text = `⚠️ <b>Fuel stop o'tkazib yuborildi</b>\n<b>Unit ${tgEsc(unit)}${driver}</b>\n` +
+    `${stop}\nYoqilg'i <b>${a.arrivedFuel}%</b> edi, hozir <b>${truck.fuel}%</b> — quyilmagan.\n` +
+    `Truck ${milesAway} mil uzoqlashdi.`;
+  await tgSend(text);
+}
 
 async function runArrivalWatch() {
   const units = Object.keys(assignments);
@@ -1956,25 +1988,37 @@ async function runArrivalWatch() {
     const truck = data.fleet.find((x) => x.unit === unit);
     if (!truck || truck.lat == null || truck.lon == null) continue;
     const air = haversineMiles(truck.lat, truck.lon, stn.lat, stn.lon);
+    const where = [stn.city, stn.st].filter(Boolean).join(", ");
+    const driver = truck.driver && truck.driver !== "Unassigned" ? ` (${tgEsc(truck.driver)})` : "";
+    const stop = `${tgEsc(BRAND_LABELS[a.brand] || a.brand)} #${tgEsc(a.num)}${where ? ` — ${tgEsc(where)}` : ""}`;
+
     if (air > ROUTE_NEAR_MI) {
-      if (a.arrivedAt) { delete a.arrivedAt; changed = true; }   // long gone
+      if (a.arrivedAt) {
+        await reportIfMissed(unit, a, truck, stop, driver, Math.round(air));
+        delete a.arrivedAt; delete a.arrivedFuel; changed = true;
+      }
       continue;
     }
     const d = await roadDistance(truck.lat, truck.lon, stn.lat, stn.lon);
     const miles = Math.round(d.miles * 10) / 10;
+
     if (miles <= ARRIVE_MI && !a.arrivedAt) {
-      const driver = truck.driver && truck.driver !== "Unassigned" ? ` (${tgEsc(truck.driver)})` : "";
-      const where = [stn.city, stn.st].filter(Boolean).join(", ");
       const fuel = truck.fuel != null ? `\nYoqilg'i: <b>${truck.fuel}%</b>` : "";
-      const limit = truck.gallonLimit ? `\nLimit: <b>${truck.gallonLimit} gal</b>` : "";
       const text = `⛽ <b>Truck stopga yetib keldi</b>\n<b>Unit ${tgEsc(unit)}${driver}</b>\n` +
-        `${tgEsc(BRAND_LABELS[a.brand] || a.brand)} #${tgEsc(a.num)}${where ? ` — ${tgEsc(where)}` : ""}${fuel}${limit}`;
+        `${stop}${fuel}${fillAdvice(unit, truck)}`;
       // Marked only once Telegram has it, same rule as the toll reminder: a
       // failed send retries on the next tick instead of being lost.
       const delivered = TG_ON ? await tgSend(text) : true;
-      if (delivered) { a.arrivedAt = new Date().toISOString(); changed = true; }
+      if (delivered) {
+        a.arrivedAt = new Date().toISOString();
+        // The level it arrived on, so leaving can be compared against it.
+        if (truck.fuel != null) a.arrivedFuel = truck.fuel;
+        changed = true;
+      }
     } else if (miles > ARRIVE_CLEAR_MI && a.arrivedAt) {
+      await reportIfMissed(unit, a, truck, stop, driver, miles);
       delete a.arrivedAt;
+      delete a.arrivedFuel;
       changed = true;
     }
   }
