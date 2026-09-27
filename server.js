@@ -339,6 +339,7 @@ function migrateAssignments() {
       const next = { brand: v.brand || "pilot", num: normNum(v.num) };
       if (v.arrivedAt) next.arrivedAt = v.arrivedAt;
       if (v.arrivedFuel != null) next.arrivedFuel = v.arrivedFuel;
+      if (v.missedAt) next.missedAt = v.missedAt;
       assignments[u] = next;
     }
     else delete assignments[u];
@@ -1942,7 +1943,13 @@ async function runTollWatch() {
 // worth a message: dispatch wants to know a truck is fuelling while they are
 // doing something else.
 const ARRIVE_MI = 3;         // same distance the board calls arrived
-const ARRIVE_CLEAR_MI = 15;  // far enough away to count as a new approach
+// Two different questions, so two distances. Five miles past the stop the
+// truck is plainly not coming back to it, and dispatch still has time to send
+// it somewhere else — that is when a missed stop is worth saying. Counting it
+// as a fresh approach takes longer: a truck circling the lot, crossing the
+// scale or running an errand should not set off a second arrival.
+const MISS_MI = 5;
+const ARRIVE_CLEAR_MI = 15;
 // A gauge wanders a point or two while a truck manoeuvres; three says fuel
 // actually went in. Below it, the truck left the stop as full as it arrived.
 const FUELED_MIN_PCT = 3;
@@ -1961,18 +1968,38 @@ function fillAdvice(unit, truck) {
   return lines.length ? "\n" + lines.join("\n") : "";
 }
 
+// Did this truck actually take fuel since it pulled in? The gauge is the first
+// answer, but it can lag — a reading only lands while the engine reports, and
+// the truck is already rolling. A recorded fill after the arrival settles it
+// either way, so a slow gauge does not get a driver accused of passing a stop
+// they used.
+function fueledSinceArrival(unit, a, truck) {
+  const since = Date.parse(a.arrivedAt);
+  if (Number.isFinite(since)) {
+    for (const f of fuelEvents[unit] || []) {
+      const t = Date.parse(f.endAt || f.at);
+      if (Number.isFinite(t) && t >= since - 10 * 60000) return true;
+    }
+  }
+  if (truck.fuel == null || a.arrivedFuel == null) return true;   // nothing to judge on
+  return truck.fuel - a.arrivedFuel >= FUELED_MIN_PCT;
+}
+
 // Leaving a stop it was sent to with a tank no fuller than it came in on: the
 // stop was passed. Checked wherever an approach ends — a truck already a
 // hundred miles down the road has left just the same, and that branch skips
 // the road-distance call, so it would otherwise clear the approach in silence
 // and the miss would never be reported.
 async function reportIfMissed(unit, a, truck, stop, driver, milesAway) {
-  const rose = (truck.fuel != null && a.arrivedFuel != null) ? truck.fuel - a.arrivedFuel : null;
-  if (rose == null || rose >= FUELED_MIN_PCT) return;
+  if (a.missedAt || fueledSinceArrival(unit, a, truck)) return false;
+  const level = (truck.fuel != null && a.arrivedFuel != null)
+    ? `Yoqilg'i <b>${a.arrivedFuel}%</b> edi, hozir <b>${truck.fuel}%</b> — quyilmagan.\n`
+    : "";
   const text = `⚠️ <b>Fuel stop o'tkazib yuborildi</b>\n<b>Unit ${tgEsc(unit)}${driver}</b>\n` +
-    `${stop}\nYoqilg'i <b>${a.arrivedFuel}%</b> edi, hozir <b>${truck.fuel}%</b> — quyilmagan.\n` +
-    `Truck ${milesAway} mil uzoqlashdi.`;
-  await tgSend(text);
+    `${stop}\n${level}Truck ${milesAway} mil uzoqlashdi.`;
+  const delivered = TG_ON ? await tgSend(text) : true;
+  if (delivered) a.missedAt = new Date().toISOString();
+  return delivered;
 }
 
 async function runArrivalWatch() {
@@ -1995,7 +2022,7 @@ async function runArrivalWatch() {
     if (air > ROUTE_NEAR_MI) {
       if (a.arrivedAt) {
         await reportIfMissed(unit, a, truck, stop, driver, Math.round(air));
-        delete a.arrivedAt; delete a.arrivedFuel; changed = true;
+        delete a.arrivedAt; delete a.arrivedFuel; delete a.missedAt; changed = true;
       }
       continue;
     }
@@ -2015,11 +2042,15 @@ async function runArrivalWatch() {
         if (truck.fuel != null) a.arrivedFuel = truck.fuel;
         changed = true;
       }
-    } else if (miles > ARRIVE_CLEAR_MI && a.arrivedAt) {
-      await reportIfMissed(unit, a, truck, stop, driver, miles);
-      delete a.arrivedAt;
-      delete a.arrivedFuel;
-      changed = true;
+    } else if (a.arrivedAt && miles > MISS_MI) {
+      // Reported at five miles, but the approach is not closed until fifteen:
+      // clearing it here would let a truck still moving around the stop set
+      // off a second arrival message.
+      if (await reportIfMissed(unit, a, truck, stop, driver, miles)) changed = true;
+      if (miles > ARRIVE_CLEAR_MI) {
+        delete a.arrivedAt; delete a.arrivedFuel; delete a.missedAt;
+        changed = true;
+      }
     }
   }
   if (changed) { saveAssignments(); fsBoardCache = { data: null, at: 0 }; }
