@@ -332,7 +332,14 @@ function migrateAssignments() {
   for (const u in assignments) {
     const v = assignments[u];
     if (typeof v === "string") assignments[u] = { brand: "pilot", num: normNum(v) };
-    else if (v && v.num) assignments[u] = { brand: v.brand || "pilot", num: normNum(v.num) };
+    else if (v && v.num) {
+      // arrivedAt records that the arrival alert for this stop already went
+      // out. It has to survive the rewrite, or a restart would re-announce
+      // every truck that pulled in hours ago.
+      const next = { brand: v.brand || "pilot", num: normNum(v.num) };
+      if (v.arrivedAt) next.arrivedAt = v.arrivedAt;
+      assignments[u] = next;
+    }
     else delete assignments[u];
   }
 }
@@ -1928,6 +1935,52 @@ async function runTollWatch() {
   if (changed) { saveTollPoints(); tpBoardCache = { data: null, at: 0 }; } // so the ✓ shows up promptly
 }
 
+// --- Fuel stop arrivals ---
+// The board already shows "✅ keldi" when an assigned truck is within a few
+// miles, but only to whoever happens to have the page open. The same fact is
+// worth a message: dispatch wants to know a truck is fuelling while they are
+// doing something else.
+const ARRIVE_MI = 3;         // same distance the board calls arrived
+const ARRIVE_CLEAR_MI = 15;  // far enough away to count as a new approach
+
+async function runArrivalWatch() {
+  const units = Object.keys(assignments);
+  if (!units.length) return;               // nothing assigned -> no Motive call
+  let data;
+  try { data = await getFuelData(); } catch { return; }
+  let changed = false;
+  for (const unit of units) {
+    const a = assignments[unit];
+    const stn = (brandStations[a.brand] || {})[a.num];
+    if (!stn) continue;
+    const truck = data.fleet.find((x) => x.unit === unit);
+    if (!truck || truck.lat == null || truck.lon == null) continue;
+    const air = haversineMiles(truck.lat, truck.lon, stn.lat, stn.lon);
+    if (air > ROUTE_NEAR_MI) {
+      if (a.arrivedAt) { delete a.arrivedAt; changed = true; }   // long gone
+      continue;
+    }
+    const d = await roadDistance(truck.lat, truck.lon, stn.lat, stn.lon);
+    const miles = Math.round(d.miles * 10) / 10;
+    if (miles <= ARRIVE_MI && !a.arrivedAt) {
+      const driver = truck.driver && truck.driver !== "Unassigned" ? ` (${tgEsc(truck.driver)})` : "";
+      const where = [stn.city, stn.st].filter(Boolean).join(", ");
+      const fuel = truck.fuel != null ? `\nYoqilg'i: <b>${truck.fuel}%</b>` : "";
+      const limit = truck.gallonLimit ? `\nLimit: <b>${truck.gallonLimit} gal</b>` : "";
+      const text = `⛽ <b>Truck stopga yetib keldi</b>\n<b>Unit ${tgEsc(unit)}${driver}</b>\n` +
+        `${tgEsc(BRAND_LABELS[a.brand] || a.brand)} #${tgEsc(a.num)}${where ? ` — ${tgEsc(where)}` : ""}${fuel}${limit}`;
+      // Marked only once Telegram has it, same rule as the toll reminder: a
+      // failed send retries on the next tick instead of being lost.
+      const delivered = TG_ON ? await tgSend(text) : true;
+      if (delivered) { a.arrivedAt = new Date().toISOString(); changed = true; }
+    } else if (miles > ARRIVE_CLEAR_MI && a.arrivedAt) {
+      delete a.arrivedAt;
+      changed = true;
+    }
+  }
+  if (changed) { saveAssignments(); fsBoardCache = { data: null, at: 0 }; }
+}
+
 server.listen(PORT, () => {
   console.log(`\n  Fuel board running:  http://localhost:${PORT}`);
   console.log(`  API endpoint:        http://localhost:${PORT}/api/fuel`);
@@ -1936,6 +1989,7 @@ server.listen(PORT, () => {
   console.log(`  Stations:            Pilot ${Object.keys(brandStations.pilot).length} · Love's ${Object.keys(brandStations.loves).length} · TA/Petro ${Object.keys(brandStations.ta).length}`);
   console.log(`  Durable store:       ${GH_ON ? "configuring…" : "OFF — set GH_TOKEN/GH_REPO for permanence"}`);
   console.log(`  Toll reminder:       ${TG_ON ? `Telegram ✓ (chat ${TG_CHAT})` : "board only — set TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID for Telegram"}`);
+  console.log(`  Stop arrivals:       ${TG_ON ? `Telegram ✓ (${ARRIVE_MI} mi)` : "board only"}`);
   console.log(`  Toll directions:     ${SHEET_ON ? `sheet har ${SHEET_POLL_MIN} daq · eslatma har ${REMIND_EVERY_MIN} daq ✓` : "OFF — set TOLL_SHEET_CSV"}\n`);
   initDurable()
     .catch((e) => console.error("initDurable", e.message))
@@ -1948,4 +2002,5 @@ server.listen(PORT, () => {
   // After initDurable, so the diag write lands once the repo shas are known.
   setTimeout(() => tgBootCheck().catch((e) => console.error("tgBootCheck", e.message)), 8000);
   setInterval(() => runTollWatch().catch((e) => console.error("tollWatch", e.message)), TOLL_WATCH_MS);
+  setInterval(() => runArrivalWatch().catch((e) => console.error("arrivalWatch", e.message)), TOLL_WATCH_MS);
 });

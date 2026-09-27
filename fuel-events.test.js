@@ -3,7 +3,9 @@ const fs = require("fs");
 const path = require("path");
 const Module = require("module");
 
-const dir = "/workspace/fuel-board";
+// Wherever the checkout happens to be — the path was pinned to one
+// machine and broke the moment the repo was cloned somewhere else.
+const dir = __dirname;
 process.chdir(dir);
 for (const f of ["fuel_events.json"]) { try { fs.unlinkSync(path.join(dir, f)); } catch {} }
 fs.writeFileSync(path.join(dir, "fuel_series.json"), "{}");
