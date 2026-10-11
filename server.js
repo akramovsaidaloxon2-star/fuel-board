@@ -30,12 +30,36 @@ const AUTH_USER = process.env.AUTH_USER || "";       // legacy single login = ma
 const AUTH_PASS = process.env.AUTH_PASS || "";
 const MANAGER_USER = process.env.MANAGER_USER || "";
 const MANAGER_PASS = process.env.MANAGER_PASS || "";
-const AUTH_ON = !!(AUTH_USER && AUTH_PASS) || !!(MANAGER_USER && MANAGER_PASS);
 
-// Validate a username/password -> role (used by the login form).
-function roleFor(u, p) {
-  if (MANAGER_USER && u === MANAGER_USER && p === MANAGER_PASS) return "manager";
-  if (AUTH_USER && u === AUTH_USER && p === AUTH_PASS) return "manager";
+// Everyone who plans fuel gets their own login. Until now the whole office
+// shared one, so the board could record that a truck was sent to a station but
+// never who sent it — and "is this planned well?" is a question about people.
+//
+//   USERS=alisher:pass1,bek:pass2,dilshod:pass3
+//
+// Names are kept to letters, digits, dot, dash and underscore: the name rides
+// in the session cookie beside the role, and a separator inside it would let
+// one person's cookie read as another's.
+const USER_RE = /^[A-Za-z0-9_.-]{1,40}$/;
+const USERS = (() => {
+  const out = {};
+  for (const entry of String(process.env.USERS || "").split(",")) {
+    const [name, pass] = entry.split(":");
+    const u = (name || "").trim(), p = (pass || "").trim();
+    if (!u || !p) continue;
+    if (!USER_RE.test(u)) { console.error(`⚠  USERS: "${u}" nomi yaroqsiz — faqat harf, raqam, . _ -`); continue; }
+    out[u] = p;
+  }
+  return out;
+})();
+
+const AUTH_ON = !!(AUTH_USER && AUTH_PASS) || !!(MANAGER_USER && MANAGER_PASS) || Object.keys(USERS).length > 0;
+
+// Validate a username/password -> { user, role }, or null.
+function userFor(u, p) {
+  if (USERS[u] && USERS[u] === p) return { user: u, role: "manager" };
+  if (MANAGER_USER && u === MANAGER_USER && p === MANAGER_PASS) return { user: u, role: "manager" };
+  if (AUTH_USER && u === AUTH_USER && p === AUTH_PASS) return { user: u, role: "manager" };
   return null;
 }
 // Signed session cookie (no DB needed). The retired seats' passwords stay in
@@ -43,25 +67,34 @@ function roleFor(u, p) {
 // everyone out on deploy for no benefit.
 const SESSION_SECRET = process.env.SESSION_SECRET || (MANAGER_PASS + (process.env.WORKER_PASS || "") + AUTH_PASS + "mvx-v1");
 function sign(s) { return crypto.createHmac("sha256", SESSION_SECRET).update(s).digest("base64url"); }
-function makeToken(role) { const p = role + "." + (Date.now() + 30 * 864e5); return p + "." + sign(p); }
+// "user|role.expiry.signature". Cookies minted before logins were split carry
+// just "role" in the first field; they stay valid with an unknown name rather
+// than logging the office out on deploy.
+function makeToken(user, role) {
+  const p = `${user}|${role}.${Date.now() + 30 * 864e5}`;
+  return p + "." + sign(p);
+}
 function verifyToken(tok) {
   if (!tok) return null;
   const parts = tok.split(".");
   if (parts.length !== 3) return null;
-  const [role, exp, sig] = parts;
-  if (sign(role + "." + exp) !== sig) return null;
+  const [head, exp, sig] = parts;
+  if (sign(head + "." + exp) !== sig) return null;
   if (Date.now() > +exp) return null;
+  const bar = head.indexOf("|");
+  const user = bar >= 0 ? head.slice(0, bar) : "";
+  const role = bar >= 0 ? head.slice(bar + 1) : head;
   // Cookies issued to the retired seats stop verifying here, so those sessions
   // land back on the login page instead of holding access that no longer exists.
   if (role !== "manager") return null;
-  return role;
+  return { user, role };
 }
 function getCookie(req, name) {
   const m = (req.headers.cookie || "").match(new RegExp("(?:^|; )" + name + "=([^;]+)"));
   return m ? decodeURIComponent(m[1]) : null;
 }
 function sessionRole(req) {
-  if (!AUTH_ON) return "manager"; // open (local dev) -> full
+  if (!AUTH_ON) return { user: "local", role: "manager" }; // open (local dev) -> full
   return verifyToken(getCookie(req, "mvx_session"));
 }
 if (!API_KEY) {
@@ -340,6 +373,8 @@ function migrateAssignments() {
       if (v.arrivedAt) next.arrivedAt = v.arrivedAt;
       if (v.arrivedFuel != null) next.arrivedFuel = v.arrivedFuel;
       if (v.missedAt) next.missedAt = v.missedAt;
+      if (v.by) next.by = v.by;
+      if (v.byAt) next.byAt = v.byAt;
       assignments[u] = next;
     }
     else delete assignments[u];
@@ -1397,18 +1432,18 @@ const server = http.createServer(async (req, res) => {
   // Validate credentials -> set a signed HttpOnly session cookie.
   if (req.url === "/api/login" && req.method === "POST") {
     const body = await readBody(req);
-    const role = roleFor((body && body.user || "").trim(), (body && body.pass) || "");
-    if (!role) {
+    const who = userFor((body && body.user || "").trim(), (body && body.pass) || "");
+    if (!who) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "Login yoki parol noto'g'ri" }));
       return;
     }
-    const tok = makeToken(role);
+    const tok = makeToken(who.user, who.role);
     res.writeHead(200, {
       "Content-Type": "application/json",
       "Set-Cookie": `mvx_session=${tok}; HttpOnly; Path=/; Max-Age=${30 * 864e2}; SameSite=Lax`,
     });
-    res.end(JSON.stringify({ ok: true, role }));
+    res.end(JSON.stringify({ ok: true, user: who.user, role: who.role }));
     return;
   }
   // Clear the session cookie.
@@ -1422,8 +1457,8 @@ const server = http.createServer(async (req, res) => {
   }
 
   // --- Cookie session gate (everything below requires a valid session) ---
-  const role = sessionRole(req);
-  if (!role) {
+  const sess = sessionRole(req);
+  if (!sess) {
     if (req.url.startsWith("/api/") || req.url === "/webhook/debug") {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "auth required" }));
@@ -1433,7 +1468,8 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
-  req._role = role;
+  req._role = sess.role;
+  req._user = sess.user;
 
   // Protected: inspect what Motive has been sending.
   if (req.url === "/webhook/debug") {
@@ -1443,7 +1479,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.url === "/api/me") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ role: req._role || "manager" }));
+    res.end(JSON.stringify({ role: req._role || "manager", user: req._user || "" }));
     return;
   }
 
@@ -1599,7 +1635,9 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ ok: false, error: `${BRAND_LABELS[brand] || brand} #${num} topilmadi (bazada ${Object.keys(dir).length} ta)` }));
       return;
     }
-    assignments[unit] = { brand, num };
+    // Who sent this truck where. Without it the board can show the plan and
+    // never say whose plan it was, which is the whole point of separate logins.
+    assignments[unit] = { brand, num, by: req._user || "", byAt: new Date().toISOString() };
     saveAssignments();
     fsBoardCache = { data: null, at: 0 };
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -2097,7 +2135,8 @@ server.listen(PORT, () => {
   console.log(`\n  Fuel board running:  http://localhost:${PORT}`);
   console.log(`  API endpoint:        http://localhost:${PORT}/api/fuel`);
   console.log(`  Motive key:          ${API_KEY ? "loaded ✓" : "MISSING ✗"}`);
-  console.log(`  Login:               ${AUTH_ON ? `on (user: ${MANAGER_USER || AUTH_USER}) ✓` : "OFF — set MANAGER_USER/MANAGER_PASS for cloud"}`);
+  const names = Object.keys(USERS);
+  console.log(`  Login:               ${AUTH_ON ? `on ✓ (${names.length ? names.join(", ") : MANAGER_USER || AUTH_USER})` : "OFF — set USERS for cloud"}`);
   console.log(`  Stations:            Pilot ${Object.keys(brandStations.pilot).length} · Love's ${Object.keys(brandStations.loves).length} · TA/Petro ${Object.keys(brandStations.ta).length}`);
   console.log(`  Durable store:       ${GH_ON ? "configuring…" : "OFF — set GH_TOKEN/GH_REPO for permanence"}`);
   console.log(`  Toll reminder:       ${TG_ON ? `Telegram ✓ (chat ${TG_CHAT})` : "board only — set TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID for Telegram"}`);
