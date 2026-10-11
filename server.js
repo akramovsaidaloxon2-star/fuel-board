@@ -446,6 +446,10 @@ const tgDiag = {
   chatSet: !!TG_CHAT,
   chatId: TG_CHAT,
   ownerChat: process.env.TELEGRAM_OWNER_CHAT_ID || "(bir xil)",
+  // Which logins the running server actually parsed. Names only — a password
+  // must never land in a file that syncs to the repo. Without this, "did the
+  // USERS variable take?" can only be answered by someone trying to log in.
+  users: Object.keys(USERS),
   getMe: null,
   lastSend: null,
 };
