@@ -1655,10 +1655,15 @@ const server = http.createServer(async (req, res) => {
       tgSend(
         `💰 <b>Oldinda arzonroq bor</b>\n<b>Unit ${tgEsc(unit)}${driver}</b>${who}\n` +
         `Tayinlandi: #${tgEsc(advice.assigned.num)} — <b>$${advice.assigned.ppg}</b>/gal · ${advice.assigned.miles} mi\n` +
-        `Oldinda: #${tgEsc(advice.better.num)} ${tgEsc([advice.better.city, advice.better.st].filter(Boolean).join(", "))} — ` +
+        `${advice.better.side === "before" ? "Yetib bormasdan" : "Oldinda"}: #${tgEsc(advice.better.num)} ` +
+        `${tgEsc([advice.better.city, advice.better.st].filter(Boolean).join(", "))} — ` +
         `<b>$${advice.better.ppg}</b>/gal · ${advice.better.miles} mi\n` +
         `Farq <b>$${advice.diff}</b>/gal · ~${advice.gallons} gal → <b>~$${advice.save} tejaladi</b>\n` +
-        `Hozir <b>${truck.fuel}%</b> · yetadigan masofa ~${advice.range} mi`
+        (advice.onWay
+          ? `\nYo'l ustida aniq: #${tgEsc(advice.onWay.num)} ${tgEsc([advice.onWay.city, advice.onWay.st].filter(Boolean).join(", "))} — ` +
+            `<b>$${advice.onWay.ppg}</b>/gal · ${advice.onWay.miles} mi → ~$${advice.onWay.save}`
+          : "") +
+        `\nHozir <b>${truck.fuel}%</b> · yetadigan masofa ~${advice.range} mi`
       ).catch(() => {});
     }
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -2147,26 +2152,48 @@ function cheaperAhead(unit, truck, brand, num) {
   const hereMi = haversineMiles(truck.lat, truck.lon, stn.lat, stn.lon);
   const course = bearingDeg(truck.lat, truck.lon, stn.lat, stn.lon);
 
-  let best = null;
+  // Kept apart on purpose. A pump short of the assigned stop is certain to be
+  // on the way — the truck is already driving to a station past it. One beyond
+  // rests on the heading holding, which is a guess. So the cheaper of the two
+  // leads, but a certain saving is always worth stating alongside it.
+  let bestBefore = null, bestAfter = null;
   for (const n of Object.keys(prices)) {
     const p = prices[n];
     const s = (brandStations.pilot || {})[n];
     if (!s || !p || typeof p.your !== "number") continue;
     if (p.your >= here.your - SAVE_MIN_PPG) continue;          // not cheap enough to matter
     const mi = haversineMiles(truck.lat, truck.lon, s.lat, s.lon);
-    if (mi <= hereMi || mi > range) continue;                   // behind it, or out of reach
+    if (mi > range) continue;                                   // out of reach on this tank
+    // Both sides of the assigned stop count. A cheaper pump short of it needs
+    // no reasoning about the route at all — it sits between the truck and a
+    // station the truck is already going to — and that is the case where the
+    // assigned stop is the dear one on a stretch that only gets dearer.
     if (angleGap(course, bearingDeg(truck.lat, truck.lon, s.lat, s.lon)) > AHEAD_DEG) continue;
-    if (!best || p.your < best.ppg) best = { num: n, ppg: p.your, miles: Math.round(mi), city: s.city, st: s.st };
+    const side = mi < hereMi ? "before" : "after";
+    const cand = { num: n, ppg: p.your, miles: Math.round(mi), city: s.city, st: s.st, side };
+    if (side === "before") { if (!bestBefore || p.your < bestBefore.ppg) bestBefore = cand; }
+    else if (!bestAfter || p.your < bestAfter.ppg) bestAfter = cand;
   }
+  const best = (bestBefore && bestAfter)
+    ? (bestBefore.ppg <= bestAfter.ppg ? bestBefore : bestAfter)
+    : (bestBefore || bestAfter);
   if (!best) return null;
 
   const gallons = fillGallonsAt(capacity, truck.fuel, mpg, best.miles);
   const diff = Math.round((here.your - best.ppg) * 1000) / 1000;
   const save = Math.round(diff * gallons);
   if (save < SAVE_MIN_USD) return null;
+  // The certain one, when it is not already the headline.
+  let onWay = null;
+  if (bestBefore && best !== bestBefore) {
+    const g = fillGallonsAt(capacity, truck.fuel, mpg, bestBefore.miles);
+    const d = Math.round((here.your - bestBefore.ppg) * 1000) / 1000;
+    const sv = Math.round(d * g);
+    if (sv >= SAVE_MIN_USD) onWay = { ...bestBefore, diff: d, gallons: g, save: sv };
+  }
   return {
     assigned: { num, ppg: Math.round(here.your * 1000) / 1000, miles: Math.round(hereMi), city: stn.city, st: stn.st },
-    better: best, diff, gallons, save, range: Math.round(range), capacity, mpg,
+    better: best, diff, gallons, save, onWay, range: Math.round(range), capacity, mpg,
   };
 }
 
