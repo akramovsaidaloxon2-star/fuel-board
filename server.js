@@ -2054,6 +2054,114 @@ async function runTollWatch() {
   if (changed) { saveTollPoints(); tpBoardCache = { data: null, at: 0 }; } // so the ✓ shows up promptly
 }
 
+// --- Road conditions: who is driving into what ---
+// Grouped by the weather, not by the truck. "Ice storm around Chicago, these
+// five units are in it" is one message somebody can act on; five separate
+// messages about five trucks is noise that hides the same fact.
+const weather = require("./weather.js");
+const NWS_BASE = process.env.NWS_BASE || "https://api.weather.gov";
+// The service asks callers to identify themselves, and refuses anonymous ones.
+const NWS_UA = process.env.NWS_UA || "movex-fuel-board (dispatch alerts)";
+const WX_POLL_MS = Math.max(+process.env.WX_POLL_MS || 30 * 60000, 60000);
+const WX_STORE = path.join(__dirname, "weather_seen.json");
+let wxSeen = {};          // alert id -> { at, units: [...] }
+try { wxSeen = JSON.parse(fs.readFileSync(WX_STORE, "utf8")); } catch { wxSeen = {}; }
+// Forecast zone outlines never change, so once fetched they are kept for good.
+const WX_ZONES = path.join(__dirname, "weather_zones.json");
+let wxZones = {};
+try { wxZones = JSON.parse(fs.readFileSync(WX_ZONES, "utf8")); } catch { wxZones = {}; }
+
+async function nwsGet(url) {
+  const r = await fetch(url, {
+    headers: { "User-Agent": NWS_UA, Accept: "application/geo+json" },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!r.ok) throw new Error(`NWS ${r.status}`);
+  return r.json();
+}
+
+// Alerts that name zones instead of drawing a polygon need the zone outline
+// before anyone can be placed inside them. Fetched once each, then cached.
+async function loadZones(alerts, budget) {
+  let added = false;
+  for (const a of alerts) {
+    if (a.geometry) continue;
+    for (const z of (a.properties && a.properties.affectedZones) || []) {
+      const id = String(z).split("/").pop();
+      if (!id || wxZones[id] !== undefined) continue;
+      if (budget.left <= 0) return added;
+      budget.left--;
+      try {
+        const j = await nwsGet(`${NWS_BASE}/zones/forecast/${id}`);
+        wxZones[id] = j && j.geometry ? j.geometry : null;
+      } catch { wxZones[id] = null; }   // remembered as unavailable, not retried every cycle
+      added = true;
+    }
+  }
+  return added;
+}
+
+async function runWeatherWatch() {
+  let data;
+  try { data = await getFuelData(); } catch { return; }
+  const trucks = (data.fleet || []).filter((t) => t && t.lat != null && t.lon != null);
+  if (!trucks.length) return;
+
+  let feed;
+  try {
+    feed = await nwsGet(`${NWS_BASE}/alerts/active?status=actual&message_type=alert`);
+  } catch (e) { console.error("weather", e.message); return; }
+  const alerts = (feed && feed.features) || [];
+
+  // Only the alerts that could matter are worth a zone lookup.
+  const worth = alerts.filter((a) => {
+    const p = (a && a.properties) || {};
+    return weather.isSevere(p) && weather.isRoadEvent(p.event);
+  });
+  const budget = { left: 40 };
+  if (await loadZones(worth, budget)) {
+    fs.writeFile(WX_ZONES, JSON.stringify(wxZones), () => {});
+  }
+
+  const hits = weather.matchAlerts(worth, trucks, wxZones);
+  let changed = false;
+
+  for (const h of hits) {
+    const seen = wxSeen[h.id];
+    const already = new Set((seen && seen.units) || []);
+    // Only units not already reported for this alert: a storm that spreads
+    // should name the trucks that have just driven into it, not repeat the
+    // ones everybody has already been told about.
+    const fresh = h.units.filter((u) => !already.has(u.unit));
+    if (!fresh.length) continue;
+
+    const list = fresh
+      .map((u) => `<b>${tgEsc(u.unit)}</b>${u.driver && u.driver !== "Unassigned" ? ` (${tgEsc(u.driver)})` : ""}`)
+      .join(", ");
+    const ends = h.ends ? new Date(h.ends) : null;
+    const until = ends && Number.isFinite(ends.getTime())
+      ? `\nTugashi: ${ends.toISOString().slice(11, 16)} UTC` : "";
+    const text = `🌧 <b>${tgEsc(h.event)}</b>\n${tgEsc(h.area).slice(0, 160)}${until}\n` +
+      `Shu hududdagi unitlar: ${list}` +
+      (h.headline ? `\n\n${tgEsc(h.headline).slice(0, 200)}` : "");
+    const delivered = TG_ON ? await tgSend(text) : true;
+    if (!delivered) continue;                       // retry on the next cycle
+    wxSeen[h.id] = { at: new Date().toISOString(), units: [...already, ...fresh.map((u) => u.unit)] };
+    changed = true;
+  }
+
+  // An alert that has expired stops being interesting, and its entry would
+  // otherwise sit in the file for ever.
+  const live = new Set(alerts.map((a) => a.id));
+  for (const id of Object.keys(wxSeen)) {
+    if (!live.has(id)) { delete wxSeen[id]; changed = true; }
+  }
+  if (changed) {
+    fs.writeFile(WX_STORE, JSON.stringify(wxSeen), () => {});
+    ghSave("weather_seen.json", wxSeen);
+  }
+}
+
 // --- Stations the trucks actually drove past ---
 // Guessing where a truck is heading was the weak part of advising on a cheaper
 // pump: nobody here knows the route. What is not a guess is where it went —
@@ -2340,6 +2448,7 @@ server.listen(PORT, () => {
   console.log(`  Durable store:       ${GH_ON ? "configuring…" : "OFF — set GH_TOKEN/GH_REPO for permanence"}`);
   console.log(`  Toll reminder:       ${TG_ON ? `Telegram ✓ (chat ${TG_CHAT})` : "board only — set TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID for Telegram"}`);
   console.log(`  Stop arrivals:       ${TG_ON ? `Telegram ✓ (${ARRIVE_MI} mi)` : "board only"}`);
+  console.log(`  Yo'l sharoiti:       ${TG_ON ? `NWS har ${Math.round(WX_POLL_MS / 60000)} daq ✓` : "OFF"}`);
   console.log(`  Narx ogohlantirishi: ${TG_ON ? `chat ${TG_OWNER_CHAT}${TG_OWNER_CHAT === TG_CHAT ? " (umumiy bilan bir xil)" : " (alohida)"}` : "OFF"}`);
   console.log(`  Toll directions:     ${SHEET_ON ? `sheet har ${SHEET_POLL_MIN} daq · eslatma har ${REMIND_EVERY_MIN} daq ✓` : "OFF — set TOLL_SHEET_CSV"}\n`);
   initDurable()
@@ -2355,4 +2464,6 @@ server.listen(PORT, () => {
   setInterval(() => runTollWatch().catch((e) => console.error("tollWatch", e.message)), TOLL_WATCH_MS);
   setInterval(() => runArrivalWatch().catch((e) => console.error("arrivalWatch", e.message)), TOLL_WATCH_MS);
   setInterval(() => runPassWatch().catch((e) => console.error("passWatch", e.message)), TOLL_WATCH_MS);
+  setTimeout(() => runWeatherWatch().catch((e) => console.error("weatherWatch", e.message)), 20000);
+  setInterval(() => runWeatherWatch().catch((e) => console.error("weatherWatch", e.message)), WX_POLL_MS);
 });
