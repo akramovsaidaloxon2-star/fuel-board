@@ -561,7 +561,13 @@ function rememberTxns(rows) {
     const key = txnKey(t);
     if (arr.some((x) => txnKey(x) === key)) continue;
     arr.push({ at: t.at, gallons: t.gallons, station: t.station || "", city: t.city || "",
-               st: t.st || "", driver: t.driver || "", invoice: t.invoice || "" });
+               st: t.st || "", driver: t.driver || "", invoice: t.invoice || "",
+               // Price travels with the purchase: without it the record can
+               // say whether the fuel arrived, but nothing about whether it
+               // was bought well.
+               ppu: t.ppu == null ? null : t.ppu,
+               listPpu: t.listPpu == null ? null : t.listPpu,
+               amount: t.amount == null ? null : t.amount });
     added++;
     const keep = arr.filter((x) => Date.parse(x.at) >= cutoff);
     if (keep.length !== arr.length) fuelTxns[u] = keep;
@@ -871,6 +877,35 @@ try { const p = JSON.parse(fs.readFileSync(PRICE_STORE, "utf8")); if (p && p.pri
 function savePrices() {
   fs.writeFile(PRICE_STORE, JSON.stringify(priceData), () => {});
   ghSave("prices.json", priceData);
+  rememberPrices();
+}
+
+// --- What fuel cost on the days it was bought ---
+// prices.json holds today and is overwritten tomorrow, which is fine for
+// routing a truck now and useless for asking afterwards whether last Tuesday's
+// purchase was a good one. A thin daily snapshot — the station's own price
+// only — keeps that question answerable without storing the whole report.
+const PRICE_HIST_STORE = path.join(__dirname, "prices_history.json");
+let priceHistory = {};
+try { priceHistory = JSON.parse(fs.readFileSync(PRICE_HIST_STORE, "utf8")); } catch { priceHistory = {}; }
+function rememberPrices() {
+  const day = String(priceData.date || "").trim();
+  if (!day || !priceData.prices) return;
+  // The report's own effective date, normalized, so a day uploaded twice
+  // lands in one place rather than two.
+  const d = new Date(day);
+  const key = Number.isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : day;
+  const thin = {};
+  for (const num of Object.keys(priceData.prices)) {
+    const p = priceData.prices[num];
+    if (p && typeof p.your === "number") thin[num] = Math.round(p.your * 1000) / 1000;
+  }
+  if (!Object.keys(thin).length) return;
+  priceHistory[key] = thin;
+  const cutoff = new Date(Date.now() - 400 * 864e5).toISOString().slice(0, 10);
+  for (const k of Object.keys(priceHistory)) if (k < cutoff) delete priceHistory[k];
+  fs.writeFile(PRICE_HIST_STORE, JSON.stringify(priceHistory), () => {});
+  ghSave("prices_history.json", priceHistory);
 }
 
 // --- Helpers ---
@@ -1875,6 +1910,8 @@ async function initDurable() {
     if (as && typeof as === "object" && !Array.isArray(as)) { assignments = as; migrateAssignments(); }
     const tp = await ghLoad("toll_points.json");
     if (tp && typeof tp === "object" && !Array.isArray(tp)) { tollPoints = tp; migrateTollPoints(); }
+    const ph = await ghLoad("prices_history.json");
+    if (ph && typeof ph === "object" && !Array.isArray(ph)) priceHistory = ph;
     const pr = await ghLoad("prices.json");
     if (pr && pr.prices) priceData = pr;
     const un = await ghLoad("unit_notes.json");

@@ -21,3 +21,4 @@ fuel_events.json
 fuel_txns.json
 station_geo.json
 audit_ignore.json
+prices_history.json

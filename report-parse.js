@@ -25,6 +25,13 @@ const HEADERS = {
   state: ["state/ prov", "state/prov", "state", "st"],
   driver: ["driver name", "driver"],
   invoice: ["invoice", "invoice #", "ticket"],
+  // What the gallon cost. Fuel planning is judged on price more than on
+  // anything else, and the export has carried these all along — they were
+  // simply not being read. "disc ppu" is the per-gallon price actually paid
+  // after the discount; "unit price" is the pump price before it.
+  ppu: ["disc ppu", "price/gal", "ppg", "net ppu", "unit cost"],
+  listPpu: ["unit price", "retail price", "pump price"],
+  amount: ["amt", "amount", "total", "net amount", "disc cost"],
 };
 
 function findColumns(headerRow) {
@@ -90,8 +97,23 @@ function parseSheet(rows) {
     const unit = normUnit(r[col.unit]);
     const at = toISO(r[col.date], col.time != null ? r[col.time] : "");
     if (!unit || !at || !(gallons > 0)) { skipped++; bump(`${item} (raqam yoki sana yo'q)`); continue; }
+    // Money arrives as "$5.099" or "1,234.56" depending on the export.
+    const num = (i) => {
+      if (i == null) return null;
+      const v = Number(String(r[i]).replace(/[$,\s]/g, ""));
+      return Number.isFinite(v) && v > 0 ? v : null;
+    };
+    const ppu = num(col.ppu);
+    const amount = num(col.amount);
     txns.push({
       unit, at, gallons: Math.round(gallons * 10) / 10,
+      // What the gallon actually cost, worked out from the total when the
+      // export names no per-gallon column. Fuel planning is judged on price
+      // before anything else, so this is the number that must not go missing.
+      ppu: ppu != null ? Math.round(ppu * 1000) / 1000
+        : (amount != null ? Math.round((amount / gallons) * 1000) / 1000 : null),
+      listPpu: num(col.listPpu),
+      amount,
       station: String(col.station != null ? r[col.station] || "" : "").trim(),
       city: String(col.city != null ? r[col.city] || "" : "").trim(),
       st: String(col.state != null ? r[col.state] || "" : "").trim(),
