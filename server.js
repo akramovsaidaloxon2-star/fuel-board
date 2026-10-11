@@ -1640,8 +1640,29 @@ const server = http.createServer(async (req, res) => {
     assignments[unit] = { brand, num, by: req._user || "", byAt: new Date().toISOString() };
     saveAssignments();
     fsBoardCache = { data: null, at: 0 };
+
+    // The one moment the choice can still be changed: say so now, on the
+    // board and in Telegram, rather than in a report next week.
+    let advice = null, truck = null;
+    try {
+      const data = await getFuelData();
+      truck = (data.fleet || []).find((x) => x.unit === unit) || null;
+      if (truck) advice = cheaperAhead(unit, truck, brand, num);
+    } catch { /* advice is a bonus; the assignment itself stands */ }
+    if (advice && truck) {
+      const who = req._user ? ` · ${tgEsc(req._user)}` : "";
+      const driver = truck.driver && truck.driver !== "Unassigned" ? ` (${tgEsc(truck.driver)})` : "";
+      tgSend(
+        `💰 <b>Oldinda arzonroq bor</b>\n<b>Unit ${tgEsc(unit)}${driver}</b>${who}\n` +
+        `Tayinlandi: #${tgEsc(advice.assigned.num)} — <b>$${advice.assigned.ppg}</b>/gal · ${advice.assigned.miles} mi\n` +
+        `Oldinda: #${tgEsc(advice.better.num)} ${tgEsc([advice.better.city, advice.better.st].filter(Boolean).join(", "))} — ` +
+        `<b>$${advice.better.ppg}</b>/gal · ${advice.better.miles} mi\n` +
+        `Farq <b>$${advice.diff}</b>/gal · ~${advice.gallons} gal → <b>~$${advice.save} tejaladi</b>\n` +
+        `Hozir <b>${truck.fuel}%</b> · yetadigan masofa ~${advice.range} mi`
+      ).catch(() => {});
+    }
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, unit, brand, station: { num, ...dir[num] } }));
+    res.end(JSON.stringify({ ok: true, unit, brand, station: { num, ...dir[num] }, advice }));
     return;
   }
   // Clear a unit's fuel stop (e.g. once it has fueled).
@@ -1948,6 +1969,8 @@ async function initDurable() {
     if (as && typeof as === "object" && !Array.isArray(as)) { assignments = as; migrateAssignments(); }
     const tp = await ghLoad("toll_points.json");
     if (tp && typeof tp === "object" && !Array.isArray(tp)) { tollPoints = tp; migrateTollPoints(); }
+    const ps = await ghLoad("passed_stations.json");
+    if (ps && typeof ps === "object" && !Array.isArray(ps)) passedStations = ps;
     const ph = await ghLoad("prices_history.json");
     if (ph && typeof ph === "object" && !Array.isArray(ph)) priceHistory = ph;
     const pr = await ghLoad("prices.json");
@@ -2010,6 +2033,141 @@ async function runTollWatch() {
     }
   }
   if (changed) { saveTollPoints(); tpBoardCache = { data: null, at: 0 }; } // so the ✓ shows up promptly
+}
+
+// --- Stations the trucks actually drove past ---
+// Guessing where a truck is heading was the weak part of advising on a cheaper
+// pump: nobody here knows the route. What is not a guess is where it went —
+// so every station a truck rolls past is written down with the fuel it had at
+// the time. Afterwards the question answers itself: it fuelled at a $5.90 pump
+// carrying three hundred miles of range, and then drove past a $5.20 pump
+// inside that range. No route data needed, and none of it is recoverable
+// later, so the record starts now.
+const PASS_MI = 3;                    // within this, the truck was at that exit
+const PASS_DEDUP_MS = 3 * 3600000;    // parked at a stop should log once, not forty times
+const PASS_STORE = path.join(__dirname, "passed_stations.json");
+let passedStations = {};
+try { passedStations = JSON.parse(fs.readFileSync(PASS_STORE, "utf8")); } catch { passedStations = {}; }
+let passTimer = null;
+function savePassed() {
+  clearTimeout(passTimer);
+  passTimer = setTimeout(() => {
+    fs.writeFile(PASS_STORE, JSON.stringify(passedStations), () => {});
+    ghSave("passed_stations.json", passedStations);
+  }, 5000);
+}
+
+async function runPassWatch() {
+  let data;
+  try { data = await getFuelData(); } catch { return; }
+  const pilot = brandStations.pilot || {};
+  const prices = (priceData && priceData.prices) || {};
+  const now = Date.now();
+  let changed = false;
+
+  for (const truck of data.fleet || []) {
+    if (!truck || truck.lat == null || truck.lon == null) continue;
+    // Nearest station within the radius — an exit can hold two of them, and
+    // the truck was at one.
+    let near = null, nearMi = PASS_MI;
+    for (const num of Object.keys(pilot)) {
+      const s = pilot[num];
+      if (s.lat == null) continue;
+      if (Math.abs(s.lat - truck.lat) > 0.1 || Math.abs(s.lon - truck.lon) > 0.12) continue;  // cheap reject
+      const mi = haversineMiles(truck.lat, truck.lon, s.lat, s.lon);
+      if (mi < nearMi) { near = num; nearMi = mi; }
+    }
+    if (!near) continue;
+    const arr = (passedStations[truck.unit] = passedStations[truck.unit] || []);
+    const last = arr[arr.length - 1];
+    if (last && last.num === near && now - Date.parse(last.at) < PASS_DEDUP_MS) continue;
+    arr.push({
+      at: new Date(now).toISOString(),
+      num: near,
+      fuel: truck.fuel == null ? null : truck.fuel,
+      odo: truck.odometer == null ? null : truck.odometer,
+      // The price that day, kept with the sighting: the daily snapshot can
+      // have gaps, and this is the number the decision would have been made on.
+      ppg: prices[near] && typeof prices[near].your === "number"
+        ? Math.round(prices[near].your * 1000) / 1000 : null,
+    });
+    const cutoff = now - 120 * 864e5;
+    while (arr.length && Date.parse(arr[0].at) < cutoff) arr.shift();
+    changed = true;
+  }
+  if (changed) savePassed();
+}
+
+// --- Is there a cheaper pump within reach? ---
+// Asked the moment a stop is assigned, because that is the moment it can still
+// be changed. A truck on 40% sent twenty miles up the road to a $5.90 pump may
+// have three hundred miles in the tank and a $5.20 pump inside that range; the
+// difference on a single fill runs to a hundred dollars and nobody can hold
+// seven hundred station prices in their head.
+const SAVE_MIN_PPG = 0.10;   // smaller gaps are not worth a message
+const SAVE_MIN_USD = 25;     // nor are small fills at a big gap
+const RESERVE_PCT = 15;      // never plan a truck down to fumes
+const AHEAD_DEG = 50;        // "further along the same way", not behind or sideways
+const FALLBACK_MPG = 6.5;    // fleet-typical, when a truck has not reported one
+
+function bearingDeg(lat1, lon1, lat2, lon2) {
+  const toR = Math.PI / 180;
+  const p1 = lat1 * toR, p2 = lat2 * toR, dl = (lon2 - lon1) * toR;
+  const y = Math.sin(dl) * Math.cos(p2);
+  const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl);
+  return (Math.atan2(y, x) * (180 / Math.PI) + 360) % 360;
+}
+const angleGap = (a, b) => { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
+
+// Gallons this truck would put in at a station that far away: what the tank
+// holds, less what is left when it gets there.
+function fillGallonsAt(capacity, fuelPct, mpg, miles) {
+  const used = (miles / mpg) / capacity * 100;
+  const arrive = Math.max(fuelPct - used, 0);
+  return Math.round(capacity * (100 - arrive) / 100);
+}
+
+function cheaperAhead(unit, truck, brand, num) {
+  // Prices come from the Pilot/Flying J report, which is where the fleet
+  // fuels; another brand has coordinates but no price to compare.
+  if (brand !== "pilot") return null;
+  const prices = (priceData && priceData.prices) || {};
+  const here = prices[num];
+  const stn = (brandStations.pilot || {})[num];
+  if (!here || typeof here.your !== "number" || !stn) return null;
+  if (truck.lat == null || truck.lon == null || truck.fuel == null) return null;
+
+  const capacity = audit.estimateCapacity(fuelTxns[unit] || [], fuelEvents[unit] || []) || truck.tankGal || 150;
+  const mpg = truck.mpg && truck.mpg > 2 && truck.mpg < 12 ? truck.mpg : FALLBACK_MPG;
+  // What the truck can cover on what it is carrying, holding a reserve back.
+  const usablePct = Math.max(truck.fuel - RESERVE_PCT, 0);
+  const range = (usablePct / 100) * capacity * mpg;
+  if (!(range > 0)) return null;
+
+  const hereMi = haversineMiles(truck.lat, truck.lon, stn.lat, stn.lon);
+  const course = bearingDeg(truck.lat, truck.lon, stn.lat, stn.lon);
+
+  let best = null;
+  for (const n of Object.keys(prices)) {
+    const p = prices[n];
+    const s = (brandStations.pilot || {})[n];
+    if (!s || !p || typeof p.your !== "number") continue;
+    if (p.your >= here.your - SAVE_MIN_PPG) continue;          // not cheap enough to matter
+    const mi = haversineMiles(truck.lat, truck.lon, s.lat, s.lon);
+    if (mi <= hereMi || mi > range) continue;                   // behind it, or out of reach
+    if (angleGap(course, bearingDeg(truck.lat, truck.lon, s.lat, s.lon)) > AHEAD_DEG) continue;
+    if (!best || p.your < best.ppg) best = { num: n, ppg: p.your, miles: Math.round(mi), city: s.city, st: s.st };
+  }
+  if (!best) return null;
+
+  const gallons = fillGallonsAt(capacity, truck.fuel, mpg, best.miles);
+  const diff = Math.round((here.your - best.ppg) * 1000) / 1000;
+  const save = Math.round(diff * gallons);
+  if (save < SAVE_MIN_USD) return null;
+  return {
+    assigned: { num, ppg: Math.round(here.your * 1000) / 1000, miles: Math.round(hereMi), city: stn.city, st: stn.st },
+    better: best, diff, gallons, save, range: Math.round(range), capacity, mpg,
+  };
 }
 
 // --- Fuel stop arrivals ---
@@ -2154,4 +2312,5 @@ server.listen(PORT, () => {
   setTimeout(() => tgBootCheck().catch((e) => console.error("tgBootCheck", e.message)), 8000);
   setInterval(() => runTollWatch().catch((e) => console.error("tollWatch", e.message)), TOLL_WATCH_MS);
   setInterval(() => runArrivalWatch().catch((e) => console.error("arrivalWatch", e.message)), TOLL_WATCH_MS);
+  setInterval(() => runPassWatch().catch((e) => console.error("passWatch", e.message)), TOLL_WATCH_MS);
 });
