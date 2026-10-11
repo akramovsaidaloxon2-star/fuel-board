@@ -486,6 +486,27 @@ async function tgSend(text, chatId) {
     return true;
   } catch (e) { console.error("telegram err", e.message); tgNote({ ok: false, error: e.message }); return false; }
 }
+// A radar loop with the warning written under it. Telegram fetches the URL
+// itself, so nothing is downloaded here. If it cannot — a bad URL, a slow
+// server, a format it will not take — the caller still sends the words:
+// a missing picture must never cost the message.
+async function tgAnimation(url, caption, chatId) {
+  if (!TG_ON) return false;
+  try {
+    const r = await fetch(`${TG_API}/bot${TG_TOKEN}/sendAnimation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId || TG_CHAT, animation: url,
+        caption: caption.slice(0, 1024), parse_mode: "HTML",
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!r.ok) { console.error("telegram animation", r.status, (await r.text()).slice(0, 200)); return false; }
+    return true;
+  } catch (e) { console.error("telegram animation err", e.message); return false; }
+}
+
 // Ask Telegram who we are at boot: it separates a bad token (Unauthorized)
 // from a bad chat id, which otherwise look identical from the board.
 async function tgBootCheck() {
@@ -2144,7 +2165,12 @@ async function runWeatherWatch() {
     const text = `🌧 <b>${tgEsc(h.event)}</b>\n${tgEsc(h.area).slice(0, 160)}${until}\n` +
       `Shu hududdagi unitlar: ${list}` +
       (h.headline ? `\n\n${tgEsc(h.headline).slice(0, 200)}` : "");
-    const delivered = TG_ON ? await tgSend(text) : true;
+    // The radar where the trucks are, not where the alert was filed.
+    const anchor = fresh[0];
+    const radar = weather.radarUrl(anchor.lat, anchor.lon);
+    const delivered = TG_ON
+      ? ((await tgAnimation(radar, text)) || (await tgSend(text)))
+      : true;
     if (!delivered) continue;                       // retry on the next cycle
     wxSeen[h.id] = { at: new Date().toISOString(), units: [...already, ...fresh.map((u) => u.unit)] };
     changed = true;

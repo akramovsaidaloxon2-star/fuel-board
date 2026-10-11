@@ -87,5 +87,17 @@ console.log("\n=== 7. Takrorlangan truck bir marta yoziladi");
 const dup = w.matchAlerts([alerts[0]], [inChi, inChi, inGary, inChi], {});
 eq(dup[0].units.map((u) => u.unit), ["1399", "7503"], "har bir unit bir marta");
 
+console.log("\n=== 8. Radar mintaqasi");
+for (const [name, lat, lon, want] of [
+  ["Chicago", 41.85, -87.65, "CENTGRLAKES"],
+  ["Midland TX", 31.9, -102.3, "SOUTHPLAINS"],
+  ["Denver", 39.7, -104.99, "SOUTHROCKIES"],
+  ["Minneapolis", 44.98, -93.27, "UPPERMISSVLY"],
+  ["Seattle", 47.6, -122.3, "PACNORTHWEST"],
+  ["Miami", 25.8, -80.2, "SOUTHEAST"],
+]) eq(w.radarRegion(lat, lon), want, name);
+eq(w.radarRegion(null, null), "CONUS", "joylashuvsiz — butun mamlakat");
+eq(w.radarUrl(41.85, -87.65), "https://radar.weather.gov/ridge/standard/CENTGRLAKES_loop.gif", "URL");
+
 console.log(fail ? `\n${fail} ta xato` : "\nHammasi o'tdi");
 process.exit(fail ? 1 : 0);

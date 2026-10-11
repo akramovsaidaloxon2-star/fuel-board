@@ -124,3 +124,43 @@ function matchAlerts(alerts, trucks, zoneGeom) {
 }
 
 module.exports = { matchAlerts, pointInGeometry, pointInRing, boundsOf, isRoadEvent, isSevere };
+
+// --- Radar picture for a message ---
+// The National Weather Service publishes a looping radar image per region,
+// free and without a key, and Telegram fetches a URL itself — so a message
+// can carry the weather rather than only describe it. Regions are coarse
+// boxes; a truck in Chicago gets the Great Lakes loop, not a national one
+// where its storm is four pixels wide.
+// Order matters: the boxes overlap where the mosaics do, and the first match
+// wins, so the region a city actually belongs to is listed ahead of its
+// neighbour. Chicago is Central Great Lakes, not Upper Mississippi Valley;
+// Midland is South Plains, not Southern Rockies.
+const RADAR_REGIONS = [
+  { id: "ALASKA", minLat: 51, maxLat: 72, minLon: -170, maxLon: -130 },
+  { id: "HAWAII", minLat: 18, maxLat: 23, minLon: -161, maxLon: -154 },
+  { id: "PACNORTHWEST", minLat: 42, maxLat: 50, minLon: -125, maxLon: -116 },
+  { id: "PACSOUTHWEST", minLat: 31, maxLat: 42, minLon: -125, maxLon: -114 },
+  { id: "SOUTHROCKIES", minLat: 31, maxLat: 42, minLon: -115, maxLon: -103 },
+  { id: "NORTHROCKIES", minLat: 41, maxLat: 50, minLon: -117, maxLon: -96 },
+  { id: "SOUTHPLAINS", minLat: 25, maxLat: 41, minLon: -103, maxLon: -91 },
+  { id: "CENTGRLAKES", minLat: 38, maxLat: 50, minLon: -92, maxLon: -78 },
+  { id: "UPPERMISSVLY", minLat: 41, maxLat: 50, minLon: -98, maxLon: -87 },
+  { id: "SOUTHMISSVLY", minLat: 28, maxLat: 40, minLon: -95, maxLon: -82 },
+  { id: "NORTHEAST", minLat: 38, maxLat: 48, minLon: -82, maxLon: -66 },
+  { id: "SOUTHEAST", minLat: 24, maxLat: 39, minLon: -86, maxLon: -74 },
+];
+
+function radarRegion(lat, lon) {
+  if (lat == null || lon == null) return "CONUS";
+  for (const r of RADAR_REGIONS) {
+    if (lat >= r.minLat && lat <= r.maxLat && lon >= r.minLon && lon <= r.maxLon) return r.id;
+  }
+  return "CONUS";
+}
+
+function radarUrl(lat, lon) {
+  return `https://radar.weather.gov/ridge/standard/${radarRegion(lat, lon)}_loop.gif`;
+}
+
+module.exports.radarRegion = radarRegion;
+module.exports.radarUrl = radarUrl;
