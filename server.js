@@ -445,6 +445,7 @@ const tgDiag = {
   tokenLen: TG_TOKEN.length,
   chatSet: !!TG_CHAT,
   chatId: TG_CHAT,
+  ownerChat: process.env.TELEGRAM_OWNER_CHAT_ID || "(bir xil)",
   getMe: null,
   lastSend: null,
 };
@@ -454,13 +455,21 @@ function tgDiagSave() { ghSave("telegram_diag.json", tgDiag); }
 // escaped, or a stray "&" or "<" makes Telegram reject the whole message.
 function tgEsc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 function tgNote(result) { tgDiag.lastSend = { at: new Date().toISOString(), ...result }; tgDiagSave(); }
-async function tgSend(text) {
+// Some messages are for whoever is on shift — a truck is at its stop, a toll
+// point is coming up. Others are about how the shift is doing its job, and
+// those belong to the owner alone: putting "this stop was the dear one" in
+// the room with the person who chose it is a different message entirely.
+// Unset, the owner chat is the same chat, so nothing changes until it is
+// pointed somewhere else.
+const TG_OWNER_CHAT = process.env.TELEGRAM_OWNER_CHAT_ID || TG_CHAT;
+
+async function tgSend(text, chatId) {
   if (!TG_ON) { tgNote({ ok: false, error: "TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID sozlanmagan" }); return false; }
   try {
     const r = await fetch(`${TG_API}/bot${TG_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: TG_CHAT, text, parse_mode: "HTML", disable_web_page_preview: true }),
+      body: JSON.stringify({ chat_id: chatId || TG_CHAT, text, parse_mode: "HTML", disable_web_page_preview: true }),
       signal: AbortSignal.timeout(12000),
     });
     if (!r.ok) {
@@ -1663,7 +1672,8 @@ const server = http.createServer(async (req, res) => {
           ? `\nYo'l ustida aniq: #${tgEsc(advice.onWay.num)} ${tgEsc([advice.onWay.city, advice.onWay.st].filter(Boolean).join(", "))} — ` +
             `<b>$${advice.onWay.ppg}</b>/gal · ${advice.onWay.miles} mi → ~$${advice.onWay.save}`
           : "") +
-        `\nHozir <b>${truck.fuel}%</b> · yetadigan masofa ~${advice.range} mi`
+        `\nHozir <b>${truck.fuel}%</b> · yetadigan masofa ~${advice.range} mi`,
+        TG_OWNER_CHAT
       ).catch(() => {});
     }
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -2326,6 +2336,7 @@ server.listen(PORT, () => {
   console.log(`  Durable store:       ${GH_ON ? "configuring…" : "OFF — set GH_TOKEN/GH_REPO for permanence"}`);
   console.log(`  Toll reminder:       ${TG_ON ? `Telegram ✓ (chat ${TG_CHAT})` : "board only — set TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID for Telegram"}`);
   console.log(`  Stop arrivals:       ${TG_ON ? `Telegram ✓ (${ARRIVE_MI} mi)` : "board only"}`);
+  console.log(`  Narx ogohlantirishi: ${TG_ON ? `chat ${TG_OWNER_CHAT}${TG_OWNER_CHAT === TG_CHAT ? " (umumiy bilan bir xil)" : " (alohida)"}` : "OFF"}`);
   console.log(`  Toll directions:     ${SHEET_ON ? `sheet har ${SHEET_POLL_MIN} daq · eslatma har ${REMIND_EVERY_MIN} daq ✓` : "OFF — set TOLL_SHEET_CSV"}\n`);
   initDurable()
     .catch((e) => console.error("initDurable", e.message))
