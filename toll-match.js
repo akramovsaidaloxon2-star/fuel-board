@@ -227,7 +227,7 @@ function matchDevices(tolls, tracks, plazas, opts) {
     const top = units[0] || null;
     const next = units[1] || null;
 
-    let verdict = "topilmadi", unit = "", driver = "";
+    let verdict = "topilmadi", unit = "", driver = "", source = "motive";
     if (top && d.usable >= minRows) {
       const clear = !next || top.hit >= next.hit * 1.5 + 1;
       if (top.rate >= 0.9 && clear) verdict = "ishonchli";
@@ -236,11 +236,41 @@ function matchDevices(tolls, tracks, plazas, opts) {
       if (verdict !== "aniq emas") { unit = top.unit; driver = top.driver; }
     } else if (top) verdict = "ma'lumot kam";
 
+    // The report itself is the first place to look. A transponder usually has
+    // some crossings where the toll provider did know the truck, and those
+    // name it outright — no history, no inference. When that happens the fleet
+    // history becomes a check rather than the answer: if it points somewhere
+    // else with good coverage, the transponder is in a different truck than
+    // the provider thinks, and that is worth saying out loud.
+    const named = [...d.given];
+    let conflict = "";
+    if (named.length === 1) {
+      source = "report";
+      const mine = units.find((e) => e.unit === named[0]);
+      // Contradicting the report takes more than another truck fitting: it
+      // takes knowing where the named truck was and finding it elsewhere. A
+      // truck the fleet feed says nothing about — sold, leased out, a trailer
+      // — is not evidence of anything.
+      const mineRaw = d.tally.get(named[0]);
+      const haveMine = !!(mineRaw && mineRaw.hit + mineRaw.miss >= 3);
+      if (haveMine && top && top.unit !== named[0] && top.rate >= 0.8 && (!mine || mine.rate < 0.4)) {
+        conflict = top.unit;
+        verdict = "ziddiyat";
+      } else verdict = "hisobotdan";
+      unit = named[0];
+      driver = (mine && mine.driver) || (top && top.unit === named[0] ? top.driver : "");
+    } else if (named.length > 1) {
+      source = "report";
+      verdict = "bir nechta unit";
+      unit = "";
+      driver = "";
+    }
+
     return {
       device: d.device, plate: d.plate, rows: d.rows, usable: d.usable,
       from: d.from, to: d.to,
-      given: [...d.given],
-      unit, driver, verdict,
+      given: named,
+      unit, driver, verdict, source, conflict,
       hit: top ? top.hit : 0, miss: top ? top.miss : 0,
       rate: top ? Math.round(top.rate * 100) : 0,
       candidates: units.slice(0, 5).map((e) => ({
@@ -249,6 +279,24 @@ function matchDevices(tolls, tracks, plazas, opts) {
       })),
     };
   }).sort((a, b) => b.rows - a.rows);
+
+  // A crossing with no unit on it inherits its transponder's answer: the
+  // device-level conclusion rests on every crossing at once, so it is better
+  // evidence than anything one row can offer on its own. What the row's own
+  // position matching said is kept beside it, so the two can be compared.
+  const byDev = new Map(devices.map((d) => [d.device, d]));
+  for (const r of rows) {
+    const d = byDev.get(r.device || "(nomsiz)");
+    if (!d) continue;
+    r.deviceUnit = d.unit || "";
+    r.deviceVerdict = d.verdict;
+    r.motiveUnit = r.unit;
+    if (!r.given && d.unit) {
+      r.unit = d.unit;
+      r.driver = d.driver || r.driver;
+      r.by = "device";                 // inherited from the transponder's answer
+    } else if (r.given) r.by = "report";
+  }
 
   return { rows, devices };
 }

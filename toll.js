@@ -11,6 +11,9 @@
   const { parseSheet } = (typeof TollParse !== "undefined" ? TollParse : {});
 
   const VERDICT = {
+    hisobotdan: { cls: "ok", label: "✓ Hisobotning o'zidan" },
+    ziddiyat: { cls: "bad", label: "⚠ Ziddiyat" },
+    "bir nechta unit": { cls: "warn", label: "◆ Bir nechta unit" },
     ishonchli: { cls: "ok", label: "✓ Ishonchli" },
     ehtimol: { cls: "warn", label: "≈ Ehtimol" },
     "aniq emas": { cls: "warn", label: "? Aniq emas" },
@@ -36,6 +39,7 @@
         <div class="toll-dev-ans">
           <span class="audit-chip ${v.cls}">${v.label}</span>
           ${d.unit ? `<b class="toll-unit">Unit ${esc(d.unit)}</b> <span>${esc(d.driver || "")}</span>` : `<span class="toll-dim">unit aniqlanmadi</span>`}
+          ${d.conflict ? `<span class="toll-dim">Motive tarixi <b>${esc(d.conflict)}</b> ni ko'rsatadi — transponder boshqa truckda bo'lishi mumkin</span>` : ""}
           <span class="toll-dim">${d.hit}/${d.usable} o'tishda mos (${d.rate}%)</span>
           ${rivals ? `<span class="toll-dim">boshqa nomzodlar: ${rivals}</span>` : ""}
           ${d.given && d.given.length ? `<span class="toll-dim">hisobotda yozilgan: ${d.given.map(esc).join(", ")}</span>` : ""}

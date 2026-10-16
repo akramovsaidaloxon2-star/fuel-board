@@ -2112,11 +2112,13 @@ const server = http.createServer(async (req, res) => {
       // the same unanswerable questions again.
       const fresh = have && have.miss && Date.now() - Date.parse(have.at || 0) < 14 * 864e5;
       if ((have && have.lat != null) || fresh || wanted.some((w) => w.key === key)) continue;
-      wanted.push({ key, name, st: t.states[0] });
+      // The plaza's own code ("T349 - T349 W") identifies it; only the part a
+      // person would recognise is worth looking up.
+      wanted.push({ key, name, query: t.plazaName || name, st: t.states[0] });
     }
     for (const w of wanted.slice(0, 10)) {
       try {
-        const pt = await resolveMapPoint(`${w.name} toll plaza, ${w.st}`);
+        const pt = await resolveMapPoint(`${w.query} toll plaza, ${w.st}`);
         if (pt) {
           // Marked as a guess: a geocoded name is close enough to rank trucks
           // by, not close enough to clear one.
@@ -2141,11 +2143,11 @@ const server = http.createServer(async (req, res) => {
     const who = req._user || "";
     let saved = 0;
     for (const d of out.devices) {
-      if (d.verdict !== "ishonchli" || !d.unit) continue;
+      if (!d.unit || (d.verdict !== "ishonchli" && d.verdict !== "hisobotdan")) continue;
       const prev = tollDevices[d.device];
       if (prev && prev.unit === d.unit) continue;
       tollDevices[d.device] = {
-        unit: d.unit, driver: d.driver, verdict: d.verdict, rows: d.rows,
+        unit: d.unit, driver: d.driver, verdict: d.verdict, source: d.source, rows: d.rows,
         rate: d.rate, by: who, at: new Date().toISOString(),
         was: prev ? prev.unit : null,
       };

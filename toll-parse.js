@@ -18,17 +18,22 @@
   else root.TollParse = api;
 })(typeof self !== "undefined" ? self : this, function () {
 
+// Written against a real PrePass export, whose headings turned out to be
+// Posting_Date / PPTagID / ETagID_Plate / EquipID / Exit_Plaza — underscores
+// and all. The aliases cover both that spelling and the one the web view
+// shows ("Truck ID", "PP Device ID"), because the same report is exported
+// under both.
 const HEADERS = {
-  postDate: ["post date", "posting date", "posted"],
-  invoiceDate: ["invoice date", "inv date"],
+  postDate: ["post date", "posting date", "posted", "postdate", "postingdate"],
+  invoiceDate: ["invoice date", "inv date", "invoicedate"],
   source: ["source"],
-  readType: ["read type", "read"],
-  // The transponder itself. When Truck ID is blank this is the only thing
-  // tying a pile of crossings together, and it is what the answer gets
+  readType: ["read type", "read", "readtype"],
+  // The transponder itself. When the unit column is blank this is the only
+  // thing tying a pile of crossings together, and it is what the answer gets
   // written against.
-  device: ["pp device id", "device id", "transponder", "transponder id", "tag", "tag id"],
-  plate: ["toll device id or plate", "toll device id", "plate", "license plate", "lic plate"],
-  unit: ["truck id", "truck", "unit", "unit #", "unit no", "vehicle", "vehicle id", "asset id"],
+  device: ["pptagid", "pp tag id", "pp device id", "device id", "transponder", "transponder id", "tag", "tag id"],
+  plate: ["etagid plate", "etagid", "e tag id plate", "toll device id or plate", "toll device id", "plate", "license plate", "lic plate"],
+  unit: ["equipid", "equip id", "truck id", "truck", "unit", "unit #", "unit no", "vehicle", "vehicle id", "asset id"],
   agency: ["agency", "toll agency", "authority"],
   entryPlaza: ["entry plaza", "entry", "entry point", "plaza in"],
   entryDate: ["entry date"],
@@ -36,9 +41,10 @@ const HEADERS = {
   exitPlaza: ["exit plaza", "exit", "exit point", "plaza out", "plaza", "location"],
   exitDate: ["exit date", "trans date", "transaction date", "date"],
   exitTime: ["exit time", "trans time", "transaction time", "time"],
-  cls: ["cl", "cls", "class", "veh class", "axles"],
-  miles: ["mi", "miles", "distance"],
-  toll: ["toll", "toll amt", "toll amount", "amount", "amt", "charge", "fare"],
+  cls: ["toll class", "cl", "cls", "class", "veh class", "axles"],
+  miles: ["miles", "mi", "distance"],
+  toll: ["toll amount", "toll amt", "toll", "amount", "amt", "charge", "fare"],
+  custId: ["custid", "cust id", "customer id", "account"],
 };
 
 // Which state's clock a plaza runs on, and which state to look for the truck
@@ -57,6 +63,14 @@ const AGENCIES = {
   PTC: { states: ["PA"], name: "Pennsylvania Turnpike" },
   PATP: { states: ["PA"], name: "Pennsylvania Turnpike" },
   NYSTA: { states: ["NY"], name: "New York Thruway" },
+  NYSBA: { states: ["NY"], name: "New York Bridge Authority" },
+  NJTP: { states: ["NJ"], name: "New Jersey Turnpike" },
+  CHICAGO: { states: ["IL"], name: "Chicago Skyway" },
+  WVPEDTA: { states: ["WV"], name: "West Virginia Parkways" },
+  RIVE: { states: ["IN", "KY"], name: "RiverLink (Louisville)" },
+  CTRMA: { states: ["TX"], name: "Central Texas Mobility" },
+  SANDAG: { states: ["CA"], name: "San Diego" },
+  COEXP: { states: ["CO"], name: "Colorado Express Lanes" },
   MTA: { states: ["NY"], name: "MTA Bridges & Tunnels" },
   PANYNJ: { states: ["NJ", "NY"], name: "Port Authority NY/NJ" },
   NJTA: { states: ["NJ"], name: "New Jersey Turnpike" },
@@ -195,6 +209,18 @@ function wallTime(v) {
   return `${String(hh).padStart(2, "0")}:${m[2]}:${m[3] || "00"}`;
 }
 
+// Plazas are written as "211 - Newton Falls" or "SKE - Chicago Skyway
+// Eastbound": a code the agency uses, then the name a person would recognise.
+// The code stays part of the plaza's identity, but only the name is worth
+// handing to a geocoder.
+function plazaName(v) {
+  const s = String(v == null ? "" : v).trim();
+  const m = s.match(/^([A-Za-z0-9]+)\s+-\s+(.+)$/);
+  if (!m) return s;
+  // "T349 - T349 W" names nothing but the gantry; leave it as it is.
+  return m[2].startsWith(m[1]) ? s : m[2];
+}
+
 function money(v) {
   if (v == null || v === "") return null;
   const n = Number(String(v).replace(/[$,\s]/g, ""));
@@ -202,8 +228,11 @@ function money(v) {
 }
 
 function findColumns(headerRow) {
+  // Underscores are spaces, and a byte-order mark at the start of the file
+  // otherwise glues itself to the first heading and hides it.
   const norm = (headerRow || []).map((h) =>
-    String(h == null ? "" : h).trim().toLowerCase().replace(/\s+/g, " ").replace(/[.#:]/g, "").trim());
+    String(h == null ? "" : h).replace(/^﻿/, "").replace(/_/g, " ")
+      .trim().toLowerCase().replace(/\s+/g, " ").replace(/[.#:]/g, "").trim());
   const col = {};
   const taken = new Set();
   for (const key of Object.keys(HEADERS)) {
@@ -277,6 +306,7 @@ function parseSheet(rows) {
       readType: cell("readType"),
       entryPlaza: cell("entryPlaza"),
       exitPlaza: cell("exitPlaza") || cell("entryPlaza"),
+      plazaName: plazaName(cell("exitPlaza") || cell("entryPlaza")),
       entryAt,
       exitAt,
       at,
@@ -310,6 +340,6 @@ function parseSheet(rows) {
 
   return {
     parseSheet, findColumns, agencyInfo, zonedToISO, tzOffsetMs,
-    wallDate, wallTime, HEADERS, AGENCIES, STATE_TZ,
+    wallDate, wallTime, plazaName, HEADERS, AGENCIES, STATE_TZ,
   };
 });

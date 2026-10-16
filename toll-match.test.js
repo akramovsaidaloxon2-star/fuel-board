@@ -162,7 +162,63 @@ eq(rival ? rival.hit : 0, 1, "1399 faqat bitta o'tishga tushadi");
 eq(rival ? rival.miss : 0, 3, "qolgan uchtasida boshqa joyda bo'lgan");
 eq(all.rows.length, 4, "har bir qatorga javob");
 
-console.log("\n=== 9. Dalil yetmasa — javob bermaydi");
+console.log("\n=== 9. Haqiqiy PrePass eksporti (PostingDate, PPTagID, EquipID...)");
+// Fayldagi ustunlar nomi web ko'rinishidan boshqacha chiqdi — pastki chiziq
+// bilan, va unit ustuni EquipID deb nomlangan.
+const REAL = ["﻿PostingDate", "InvoiceDate", "CustID", "Source", "ReadType", "PPTagID",
+  "ETagID_Plate", "EquipID", "Agency", "Entry_Plaza", "Entry_Date", "Entry_Time",
+  "Exit_Plaza", "Exit_Date", "Exit_Time", "Toll_Class", "Miles", "Toll_Amount"];
+const rc = P.findColumns(REAL);
+eq(rc.postDate, 0, "PostingDate (BOM bilan)");
+eq(rc.device, 5, "PPTagID");
+eq(rc.plate, 6, "ETagID_Plate");
+eq(rc.unit, 7, "EquipID");
+eq(rc.exitPlaza, 12, "Exit_Plaza");
+eq(rc.exitDate, 13, "Exit_Date");
+eq(rc.toll, 17, "Toll_Amount");
+const realSheet = [REAL,
+  ["10/05/26", "2026-10-31", "475931", "EZPass", "Transponder", "785064253", "01606744372",
+    "N/A", "OTC", "211 - Newton Falls", "", "", "173 - Cleveland", "10/02/26", "19:19:46", "5", "", "10.75"],
+  ["10/05/26", "2026-10-31", "475931", "EZPass", "Transponder", "785064253", "01606744372",
+    "6004", "OTC", "71 - Stony Ridge-Toledo", "", "", "49 - Swanton", "10/03/26", "1:54:29", "5", "", "9.00"],
+];
+const real = P.parseSheet(realSheet);
+eq(real.reason, "", "haqiqiy fayl o'qildi");
+eq(real.tolls.length, 2, "ikki qator");
+eq(real.tolls[0].unit, "", "N/A → bo'sh");
+eq(real.tolls[1].unit, "6004", "EquipID o'qildi");
+eq(real.tolls[0].at, "2026-10-02T23:19:46.000Z", "19:19:46 Ohio vaqti → 23:19Z");
+eq(real.tolls[1].at, "2026-10-03T05:54:29.000Z", "1:54:29 → ertalab, 05:54Z");
+eq(real.tolls[0].toll, 10.75, "toll summasi");
+eq(real.tolls[0].plazaName, "Cleveland", "plaza kodi ajratildi");
+eq(P.plazaName("T349 - T349 W"), "T349 - T349 W", "kodli gantry nomi o'zgarmaydi");
+eq(P.plazaName("SKE - Chicago Skyway Eastbound"), "Chicago Skyway Eastbound", "skyway nomi");
+eq(real.devices[0].assigned, ["6004"], "qurilma hisobotda 6004 ga biriktirilgan");
+
+console.log("\n=== 10. Hisobotning o'zi aytsa — tarixdan oldin o'sha ishlatiladi");
+// Bitta transponder: ikki o'tishda unit yozilmagan, to'rttasida 6004 deb
+// yozilgan. Javob tarixdan izlanmaydi — hisobotda turgan.
+const mixed = [
+  { row: 1, device: "T1", at: "2026-10-11T18:05:00.000Z", unit: "", agency: "ILTOLL", states: ["IL"], exitPlaza: "Elgin", exact: true },
+  { row: 2, device: "T1", at: "2026-10-11T19:35:00.000Z", unit: "", agency: "ILTOLL", states: ["IL"], exitPlaza: "River Road", exact: true },
+  { row: 3, device: "T1", at: "2026-10-11T21:00:00.000Z", unit: "6004", agency: "ILTOLL", states: ["IL"], exitPlaza: "Skyway", exact: true },
+  { row: 4, device: "T1", at: "2026-10-11T22:30:00.000Z", unit: "6004", agency: "ITRCC", states: ["IN"], exitPlaza: "Portage", exact: true },
+];
+const self = M.matchDevices(mixed, tracks, {});
+eq(self.devices[0].unit, "6004", "hisobotdagi unit olinadi");
+eq(self.devices[0].verdict, "hisobotdan", "manbasi — hisobot");
+eq(self.devices[0].source, "report", "manba belgisi");
+eq(self.rows[0].unit, "6004", "bo'sh qator ham shu unitga yoziladi");
+eq(self.rows[0].by, "device", "qanday aniqlangani") || 0;
+eq(self.rows[0].motiveUnit, "1030", "Motive tarixi nima deganini ham saqlaydi");
+// Tarix boshqa truckni ko'rsatsa — ziddiyat deb belgilanadi, yashirilmaydi
+const wrong = mixed.map((r) => ({ ...r, unit: r.unit ? "7503" : "" }));
+const clash = M.matchDevices(wrong, tracks, {});
+eq(clash.devices[0].verdict, "ziddiyat", "hisobot 7503 deydi, tarix 1030 ni ko'rsatadi");
+eq(clash.devices[0].unit, "7503", "hisobotdagi unit ko'rsatiladi");
+eq(clash.devices[0].conflict, "1030", "tarix ko'rsatgan unit ham aytiladi");
+
+console.log("\n=== 11. Dalil yetmasa — javob bermaydi");
 const thin = M.matchDevices(got.tolls.slice(0, 2), tracks, {});
 eq(thin.devices[0].verdict, "ma'lumot kam", "ikki o'tish — kam");
 eq(thin.devices[0].unit, "", "taxmin aytilmaydi");
