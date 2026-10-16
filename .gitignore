@@ -25,3 +25,5 @@ prices_history.json
 passed_stations.json
 weather_seen.json
 weather_zones.json
+toll_plazas.json
+toll_devices.json

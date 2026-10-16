@@ -4,6 +4,7 @@ const path = require("path");
 const crypto = require("crypto");
 const dirs = require("./direction-note.js");
 const audit = require("./fuel-audit.js");
+const tollMatch = require("./toll-match.js");
 
 // --- Load .env (no dependency) ---
 function loadEnv() {
@@ -419,6 +420,27 @@ function saveTollPoints() {
   fs.writeFile(TOLLPT_STORE, JSON.stringify(tollPoints), () => {});
   ghSave("toll_points.json", tollPoints);
 }
+// --- Toll report: which truck was carrying the transponder ---
+// Two things are worth keeping between reports. The plazas, because a plaza's
+// coordinates never change and looking them up is the slow part; and the
+// answers, because once a transponder has been traced to a truck the next
+// report can name it on sight.
+const PLAZA_STORE = path.join(__dirname, "toll_plazas.json");
+let tollPlazas = {};   // { "AGENCY|PLAZA": { lat, lon, name } }
+try { tollPlazas = JSON.parse(fs.readFileSync(PLAZA_STORE, "utf8")); } catch { tollPlazas = {}; }
+function savePlazas() {
+  fs.writeFile(PLAZA_STORE, JSON.stringify(tollPlazas), () => {});
+  ghSave("toll_plazas.json", tollPlazas);
+}
+
+const TOLLDEV_STORE = path.join(__dirname, "toll_devices.json");
+let tollDevices = {};  // { deviceId: { unit, driver, by, at, verdict, rows } }
+try { tollDevices = JSON.parse(fs.readFileSync(TOLLDEV_STORE, "utf8")); } catch { tollDevices = {}; }
+function saveTollDevices() {
+  fs.writeFile(TOLLDEV_STORE, JSON.stringify(tollDevices), () => {});
+  ghSave("toll_devices.json", tollDevices);
+}
+
 let tpBoardCache = { data: null, at: 0 };
 const TOLL_REMIND_MI = 20; // how far out the reminder fires (road miles)
 const ROUTE_NEAR_MI = 60;  // beyond this, straight-line miles are good enough
@@ -1015,6 +1037,90 @@ async function fetchAllVehicleLocations() {
   return all;
 }
 
+// --- Where a truck has been, not just where it is ---
+// Needed for the toll report: a toll says a transponder was at a plaza at
+// 14:32 and never says which truck, so the only way to name the truck is to
+// ask Motive where each of them was at 14:32.
+//
+// Motive addresses history by vehicle id and by date range (v3 allows up to
+// three months per call). The response shape has changed across versions and
+// the fleet's key may only be scoped for one of them, so both are tried and
+// the points are read loosely — a reading is worth having whether the field is
+// called lat or latitude.
+function readPoints(json) {
+  const out = [];
+  const walk = (node) => {
+    if (!node) return;
+    if (Array.isArray(node)) { for (const x of node) walk(x); return; }
+    if (typeof node !== "object") return;
+    // Wrapped forms: { vehicle_location: {...} }, { location: {...} }
+    for (const k of ["vehicle_location", "location", "vehicle_locations", "locations", "data"]) {
+      if (node[k]) { walk(node[k]); }
+    }
+    const lat = node.lat != null ? node.lat : node.latitude;
+    const lon = node.lon != null ? node.lon : (node.lng != null ? node.lng : node.longitude);
+    const at = node.located_at || node.time || node.timestamp || node.at || node.recorded_at;
+    if (lat != null && lon != null && at && Number.isFinite(Date.parse(at))) {
+      out.push({
+        at: new Date(at).toISOString(),
+        lat: Number(lat), lon: Number(lon),
+        description: node.description || node.address || "",
+        odometer: node.odometer != null ? node.odometer : null,
+        fuel: node.fuel_primary_remaining_percentage != null ? node.fuel_primary_remaining_percentage : null,
+      });
+    }
+  };
+  walk(json);
+  // The same reading can be reached twice through the nested forms above.
+  const seen = new Set();
+  return out
+    .filter((p) => { const k = `${p.at}|${p.lat}|${p.lon}`; if (seen.has(k)) return false; seen.add(k); return true; })
+    .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+}
+
+async function motiveTrack(vid, startDate, endDate) {
+  const paths = [
+    `/v3/vehicle_locations/${vid}?start_date=${startDate}&end_date=${endDate}`,
+    `/v1/vehicle_locations/${vid}?start_date=${startDate}&end_date=${endDate}`,
+  ];
+  let lastErr = "";
+  for (const p of paths) {
+    try {
+      const res = await fetch(`${MOTIVE_BASE}${p}`, {
+        headers: { "X-Api-Key": API_KEY },
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!res.ok) { lastErr = `${p.split("?")[0]} → ${res.status}`; continue; }
+      const pts = readPoints(await res.json());
+      if (pts.length) return { points: pts, via: p.slice(1, 3), error: "" };
+      lastErr = `${p.split("?")[0]} → bo'sh`;
+    } catch (e) {
+      lastErr = `${p.split("?")[0]} → ${e.message}`;
+    }
+  }
+  return { points: [], via: "", error: lastErr };
+}
+
+// Every truck's trail across the span the report covers. Fetched a few at a
+// time: one call per truck per report is cheap, but twenty at once is how an
+// API key gets rate-limited.
+async function fleetTracks(fleet, fromISO, toISO) {
+  const startDate = String(fromISO).slice(0, 10);
+  const endDate = String(toISO).slice(0, 10);
+  const tracks = {};
+  const errors = [];
+  const list = (fleet || []).filter((t) => t && t.unit && t.vid != null);
+  for (let i = 0; i < list.length; i += 4) {
+    const batch = list.slice(i, i + 4);
+    await Promise.all(batch.map(async (t) => {
+      const r = await motiveTrack(t.vid, startDate, endDate);
+      if (r.error && !r.points.length) errors.push(`${t.unit}: ${r.error}`);
+      tracks[t.unit] = { driver: t.driver || "", vid: t.vid, points: r.points };
+    }));
+  }
+  return { tracks, errors };
+}
+
 // --- Idle hours + wasted fuel per unit (last 24h), refreshed slowly ---
 // Source: /v1/driver_utilization rollups, keyed by driver_company_id which
 // matches the vehicle number ~99% of the time in this fleet.
@@ -1115,6 +1221,10 @@ function mapFleet(raw) {
       status: statusFromSpeed(loc.speed, ageMin),
       updated: ageMin,
       tankGal: 150,
+      // Motive's own id for the vehicle. The board works in unit numbers, but
+      // the location-history endpoint is addressed by id, so it has to be
+      // carried along for the toll report to have anything to ask about.
+      vid: v.id != null ? v.id : null,
     };
   });
 
@@ -1952,6 +2062,122 @@ const server = http.createServer(async (req, res) => {
         newTxns: rememberTxns(kept),
       },
       history: { fills, units: Object.keys(fuelEvents).length, since: earliest ? new Date(earliest).toISOString() : null },
+    }));
+    return;
+  }
+
+  // A toll report with no truck number against it. Every row says when and
+  // where; Motive says which truck was there. The answer is given per
+  // transponder rather than per row, because a transponder stays in one truck
+  // and thirty crossings are far better evidence than one.
+  if (req.url === "/api/toll-match" && req.method === "POST") {
+    const body = (await readBody(req)) || {};
+    const tolls = (Array.isArray(body.tolls) ? body.tolls : [])
+      .filter((t) => t && Number.isFinite(Date.parse(t.at)));
+    if (!tolls.length) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "hisobotda vaqti bor toll qatorlari topilmadi" }));
+      return;
+    }
+    const times = tolls.map((t) => Date.parse(t.at));
+    const from = new Date(Math.min(...times) - 864e5).toISOString();
+    const to = new Date(Math.min(Date.now() + 864e5, Math.max(...times) + 864e5)).toISOString();
+    if (Date.parse(to) - Date.parse(from) > 95 * 864e5) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "hisobot 3 oydan uzun — qisqaroq davrni yuklang" }));
+      return;
+    }
+
+    let fleet = [];
+    try { fleet = (await getFuelData()).fleet || []; }
+    catch (e) {
+      res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: `Motive javob bermadi: ${e.message}` }));
+      return;
+    }
+
+    // Plazas named in this report that have no coordinates yet. Looking a name
+    // up is slow and the lookup service asks for one request a second, so only
+    // a handful are learned per upload — the rest are matched by state until
+    // their turn comes, and once learned they are kept for good.
+    let learned = 0, missed = 0;
+    const wanted = [];
+    for (const t of tolls) {
+      const name = t.exitPlaza || t.entryPlaza;
+      if (!name || !t.states || !t.states.length) continue;
+      const key = tollMatch.plazaKey(t.agency, name);
+      const have = tollPlazas[key];
+      // A plaza the lookup service could not place is remembered as a miss for
+      // a fortnight: without that, every upload spends a second apiece asking
+      // the same unanswerable questions again.
+      const fresh = have && have.miss && Date.now() - Date.parse(have.at || 0) < 14 * 864e5;
+      if ((have && have.lat != null) || fresh || wanted.some((w) => w.key === key)) continue;
+      wanted.push({ key, name, st: t.states[0] });
+    }
+    for (const w of wanted.slice(0, 10)) {
+      try {
+        const pt = await resolveMapPoint(`${w.name} toll plaza, ${w.st}`);
+        if (pt) {
+          // Marked as a guess: a geocoded name is close enough to rank trucks
+          // by, not close enough to clear one.
+          tollPlazas[w.key] = { lat: pt.lat, lon: pt.lon, name: w.name, approx: true, at: new Date().toISOString() };
+          learned++;
+        } else {
+          tollPlazas[w.key] = { miss: true, name: w.name, at: new Date().toISOString() };
+          missed++;
+        }
+      } catch { /* a plaza without coordinates is matched by state instead */ }
+      await new Promise((r) => setTimeout(r, 1100));
+    }
+    if (wanted.length) savePlazas();
+
+    const { tracks, errors } = await fleetTracks(fleet, from, to);
+    const points = Object.values(tracks).reduce((a, t) => a + t.points.length, 0);
+    const out = tollMatch.matchDevices(tolls, tracks, tollPlazas);
+
+    // An answer worth keeping: next time this transponder turns up, the board
+    // already knows whose it is. Written against the dispatcher who ran the
+    // report so the record says who concluded it.
+    const who = req._user || "";
+    let saved = 0;
+    for (const d of out.devices) {
+      if (d.verdict !== "ishonchli" || !d.unit) continue;
+      const prev = tollDevices[d.device];
+      if (prev && prev.unit === d.unit) continue;
+      tollDevices[d.device] = {
+        unit: d.unit, driver: d.driver, verdict: d.verdict, rows: d.rows,
+        rate: d.rate, by: who, at: new Date().toISOString(),
+        was: prev ? prev.unit : null,
+      };
+      saved++;
+    }
+    if (saved) saveTollDevices();
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      ok: true,
+      devices: out.devices,
+      rows: out.rows,
+      known: tollDevices,
+      summary: {
+        tolls: tolls.length,
+        devices: out.devices.length,
+        named: out.devices.filter((d) => d.unit).length,
+        trucks: Object.keys(tracks).length,
+        points,
+        plazasKnown: Object.keys(tollPlazas).filter((k) => tollPlazas[k] && tollPlazas[k].lat != null).length,
+        plazasLearned: learned,
+        // Named but not placed: matched by state instead, which is usually
+        // enough. Kept apart from the ones still queued behind the per-upload
+        // cap, because the two call for different patience.
+        plazasMissed: missed,
+        plazasPending: Math.max(0, wanted.length - 10),
+        from, to,
+        saved,
+        // Without a trail there is nothing to match against, and the usual
+        // reason is the API key: location history is a separate permission.
+        trackErrors: errors.slice(0, 5),
+      },
     }));
     return;
   }

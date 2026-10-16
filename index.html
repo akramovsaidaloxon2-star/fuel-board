@@ -44,6 +44,7 @@
       <button class="tab" data-view="coverage"><span class="tab-ic">📡</span>Sensor coverage</button>
       <button class="tab" data-view="directions"><span class="tab-ic">🛣️</span>Direction</button>
       <button class="tab" data-view="audit"><span class="tab-ic">🧾</span>Fuel audit</button>
+      <button class="tab" data-view="toll"><span class="tab-ic">🛂</span>Toll</button>
     </nav>
     <div class="content-area">
 
@@ -310,6 +311,47 @@
       </section>
     </div>
 
+    <div id="view-toll" class="hidden">
+      <section class="dir-panel">
+        <div class="dir-head">
+          <h3>🛂 Toll hisoboti — kim yurgan</h3>
+        </div>
+        <div class="dir-draft">
+          <button class="btn primary" type="button" id="toll-btn">⬆️ Toll hisobotini yuklash (.xlsx / .csv)</button>
+          <input type="file" id="toll-file" accept=".xls,.xlsx,.csv" hidden>
+          <label class="toggle"><input type="checkbox" id="toll-only-bad"> Faqat aniqlanmaganlarni ko'rsatish</label>
+          <button class="btn" type="button" id="toll-csv" hidden>⬇️ CSV</button>
+          <span id="toll-state" class="dir-draft-state"></span>
+        </div>
+
+        <div id="toll-result" hidden>
+          <div id="toll-sum" class="audit-sum"></div>
+          <div id="toll-note" class="audit-note hidden"></div>
+          <div id="toll-devices" class="toll-devs"></div>
+          <div class="dir-list-wrap">
+            <table class="idle-table audit-table">
+              <thead><tr>
+                <th>Vaqt</th><th>Agentlik</th><th>Plaza</th><th class="num">Toll</th>
+                <th>Unit</th><th>Driver</th><th>Nomzodlar</th>
+              </tr></thead>
+              <tbody id="toll-rows"></tbody>
+            </table>
+            <div id="toll-empty" class="empty hidden">Qator yo'q</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="info-card">
+        <div class="info-icon">i</div>
+        <div>
+          <strong>Qanday aniqlanadi</strong>
+          <p>Hisobotda <strong>Truck ID</strong> bo'sh (N/A) bo'lsa ham har bir qatorda <strong>qachon</strong> va <strong>qaysi plaza</strong> yozilgan. Motive esa o'sha daqiqada har bir truck qayerda bo'lganini biladi — shuning uchun savol "transponder qayerga ketdi" emas, "o'sha paytda o'sha joyda bizning qaysi truck turgan edi" bo'ladi.</p>
+          <p>Vaqt plazaning mahalliy soatida yozilgan, shuning uchun agentlik kodidan shtat, shtatdan vaqt mintaqasi olinadi (ILTOLL — Illinois, ITRCC — Indiana, OTC — Ohio, PTC — Pennsylvania). Bir soat xato — oltmish mil xato.</p>
+          <p><strong>Javob bitta o'tishdan emas, butun hisobotdan chiqadi.</strong> Bir vaqtda Illinoysda uch truck bo'lishi mumkin, lekin transponder bir truckda turadi: o'ttiz o'tishning hammasiga mos keladigan truck — o'sha. Shuning uchun har bir qator ovoz beradi, xulosa esa transponder bo'yicha chiqadi va bir marta aniqlangan qurilma keyingi hisobotlarda darhol tanilib turadi.</p>
+        </div>
+      </section>
+    </div>
+
     </div><!-- /content-area -->
   </main>
 
@@ -339,5 +381,7 @@
   <script src="directions.js"></script>
   <script src="report-parse.js"></script>
   <script src="audit.js"></script>
+  <script src="toll-parse.js"></script>
+  <script src="toll.js"></script>
 </body>
 </html>
