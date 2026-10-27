@@ -441,6 +441,38 @@ function saveTollDevices() {
   ghSave("toll_devices.json", tollDevices);
 }
 
+// --- Weigh stations: one list, the whole fleet ---
+// Unlike a toll point, a scale is not assigned to anybody: it sits on the
+// interstate and every truck that comes near it wants the same warning. So the
+// list is flat, and the watcher sweeps the fleet against all of it.
+const SCALE_STORE = path.join(__dirname, "scale_points.json");
+let scalePoints = [];   // [ { id, label, lat, lon, url, mi, at, by } ]
+try {
+  const raw = JSON.parse(fs.readFileSync(SCALE_STORE, "utf8"));
+  scalePoints = (Array.isArray(raw) ? raw : [])
+    .filter((p) => p && Number.isFinite(+p.lat) && Number.isFinite(+p.lon))
+    .map((p) => ({ ...p, id: p.id || newPointId(), lat: +p.lat, lon: +p.lon }));
+} catch { scalePoints = []; }
+const MAX_SCALES = 200;
+function saveScalePoints() {
+  fs.writeFile(SCALE_STORE, JSON.stringify(scalePoints), () => {});
+  ghSave("scale_points.json", scalePoints);
+}
+
+const SCALE_SEEN_STORE = path.join(__dirname, "scale_seen.json");
+let scaleSeen = {};     // { "unit|scaleId": { mi, alertedAt } }
+try { scaleSeen = JSON.parse(fs.readFileSync(SCALE_SEEN_STORE, "utf8")); } catch { scaleSeen = {}; }
+let scaleSeenTimer = null;
+function saveScaleSeen() {
+  clearTimeout(scaleSeenTimer);
+  // Written on a delay: this changes every tick, and the point of keeping it is
+  // only so a restart does not repeat a warning a driver already got.
+  scaleSeenTimer = setTimeout(() => {
+    fs.writeFile(SCALE_SEEN_STORE, JSON.stringify(scaleSeen), () => {});
+    ghSave("scale_seen.json", scaleSeen);
+  }, 10000);
+}
+
 let tpBoardCache = { data: null, at: 0 };
 const TOLL_REMIND_MI = 20; // how far out the reminder fires (road miles)
 const ROUTE_NEAR_MI = 60;  // beyond this, straight-line miles are good enough
@@ -612,6 +644,17 @@ async function resolveMapPoint(input) {
   if (!pt) {
     m = u.match(/\/@(-?\d+\.\d+),(-?\d+\.\d+)/);
     if (m) pt = pick(+m[1], +m[2]);
+  }
+  // A share link can carry no coordinates at all: "maps/search/?api=1&query=
+  // 600+8th+St,+Monument,+CO" is a search, not a pin, and that is the form the
+  // Maps app hands out from a phone. The text in it is a perfectly good
+  // address, so it goes to the geocoder like a typed one.
+  if (!pt) {
+    const qm = u.match(/[?&](?:q|query|destination)=([^&#]+)/i) || u.match(/\/maps\/search\/([^/@?#]+)/i);
+    if (qm) {
+      const text = decodeURIComponent(qm[1].replace(/\+/g, " ")).trim();
+      if (text.length >= 3) return geocodePlace(text);
+    }
   }
   if (!pt) return null;
   // Name it from the /place/<name>/ segment when Google put one there.
@@ -1854,6 +1897,80 @@ const server = http.createServer(async (req, res) => {
   }
 
   // --- Toll reminder point: pin a spot from Google Maps, watch the miles left ---
+  // --- Weigh stations ---
+  if (req.url === "/api/scales" && req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      ok: true, radiusMi: SCALE_MI, max: MAX_SCALES,
+      points: scalePoints.map((p) => ({ ...p, watching: Object.keys(scaleSeen).filter((k) => k.endsWith(`|${p.id}`)).length })),
+    }));
+    return;
+  }
+
+  // Added by pasting a list: one scale per line, as a Google Maps link, a
+  // "41.31,-105.59" pair or simply a place name, optionally "Label | place"
+  // and a radius of its own after a second bar.
+  if (req.url === "/api/scales" && req.method === "POST") {
+    const body = (await readBody(req)) || {};
+    const lines = String(body.text || body.link || "")
+      .split(/\r?\n/).map((s) => s.trim()).filter(Boolean).slice(0, 60);
+    if (!lines.length) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Hech narsa kiritilmadi. Har qatorga bitta joy: link, 41.31,-105.59 yoki shahar nomi." }));
+      return;
+    }
+    const added = [], failed = [];
+    for (const line of lines) {
+      if (scalePoints.length >= MAX_SCALES) { failed.push(`${line} — ro'yxat to'ldi (${MAX_SCALES})`); continue; }
+      const parts = line.split("|").map((s) => s.trim());
+      const label = parts.length > 1 ? parts[0] : "";
+      const query = parts.length > 1 ? parts[1] : parts[0];
+      // An empty radius field means "use the default", not "use the smallest
+      // allowed" — a five-mile ring where a hundred was meant is a warning
+      // that never arrives.
+      const miRaw = parts.length > 2 ? Number(parts[2]) : 0;
+      const mi = Number.isFinite(miRaw) && miRaw > 0 ? Math.max(5, Math.min(300, miRaw)) : 0;
+      // What the place is known for — "LPR kameralar", "Level I inspection".
+      // It rides along into the alert, because a warning a driver can act on
+      // beats a warning that only says a scale exists.
+      const note = parts.length > 3 ? parts.slice(3).join(" · ").slice(0, 200) : "";
+      let pt = null;
+      try { pt = await resolveMapPoint(query); } catch { pt = null; }
+      if (!pt) { failed.push(`${query} — joy topilmadi`); continue; }
+      // The same scale pasted twice is one scale.
+      const twin = scalePoints.find((p) => scales.haversineMi(p.lat, p.lon, pt.lat, pt.lon) < 1);
+      if (twin) { failed.push(`${query} — allaqachon ro'yxatda (${twin.label})`); continue; }
+      const p = {
+        id: newPointId(), label: label || pt.label || query,
+        lat: pt.lat, lon: pt.lon, url: /^https?:/i.test(query) ? query : "",
+        mi, note, at: new Date().toISOString(), by: req._user || "",
+      };
+      scalePoints.push(p);
+      added.push(p);
+    }
+    if (added.length) saveScalePoints();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, added, failed, total: scalePoints.length }));
+    return;
+  }
+
+  if (req.url === "/api/scales/delete" && req.method === "POST") {
+    const body = (await readBody(req)) || {};
+    const id = String(body.id || "").trim();
+    const before = scalePoints.length;
+    scalePoints = scalePoints.filter((p) => p.id !== id);
+    if (scalePoints.length !== before) {
+      // Forget what any truck was doing near it, or the state file grows a
+      // tail of keys for a scale nobody watches.
+      for (const k of Object.keys(scaleSeen)) if (k.endsWith(`|${id}`)) delete scaleSeen[k];
+      saveScalePoints();
+      saveScaleSeen();
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: scalePoints.length !== before, total: scalePoints.length }));
+    return;
+  }
+
   if (req.url === "/api/toll-point/assign" && req.method === "POST") {
     const body = await readBody(req);
     const unit = (body && body.unit || "").trim();
@@ -2249,7 +2366,19 @@ async function initDurable() {
     if (ul && typeof ul === "object" && !Array.isArray(ul)) unitLimits = ul;
     const dr = await ghLoad("directions_data.json");
     if (Array.isArray(dr)) directions = dr;
+    // The scale list has to survive a restart, or every deploy silently turns
+    // the warnings off: the container's disk goes with it.
+    const sc = await ghLoad("scale_points.json");
+    if (Array.isArray(sc)) {
+      scalePoints = sc
+        .filter((p) => p && Number.isFinite(+p.lat) && Number.isFinite(+p.lon))
+        .map((p) => ({ ...p, id: p.id || newPointId(), lat: +p.lat, lon: +p.lon }))
+        .slice(0, MAX_SCALES);
+    }
+    const ss = await ghLoad("scale_seen.json");
+    if (ss && typeof ss === "object" && !Array.isArray(ss)) scaleSeen = ss;
     console.log(`  Durable store:       GitHub ${GH_REPO} ✓`);
+    if (scalePoints.length) console.log(`  Scale ro'yxati:      ${scalePoints.length} ta (durable repodan)`);
   }
   // Any unit that still has no reading at all at this point (brand new / never
   // tracked, or GH off) falls back to the static demo seed rather than showing
@@ -2301,6 +2430,50 @@ async function runTollWatch() {
     }
   }
   if (changed) { saveTollPoints(); tpBoardCache = { data: null, at: 0 }; } // so the ✓ shows up promptly
+}
+
+// --- Weigh stations: who is running into one ---
+// The warning goes out while the truck is still a long way off, so the driver
+// can be told before the signs start. The volume is kept down by the module's
+// rules rather than here: coming and not going, once per approach, moving.
+const scales = require("./scales.js");
+const SCALE_MI = Math.max(+process.env.SCALE_MI || 100, 5);
+const SCALE_OPTS = {
+  radiusMi: SCALE_MI,
+  clearMi: Math.max(+process.env.SCALE_CLEAR_MI || 40, 5),
+  aheadDeg: Math.max(+process.env.SCALE_AHEAD_DEG || 70, 20),
+  minMph: Math.max(+process.env.SCALE_MIN_MPH || 5, 0),
+};
+
+async function runScaleWatch() {
+  if (!scalePoints.length) return;              // nothing listed -> no Motive call
+  let data;
+  try { data = await getFuelData(); } catch { return; }
+
+  const { hits, seen } = scales.sweep(data.fleet || [], scalePoints, scaleSeen, SCALE_OPTS);
+  scaleSeen = seen;
+  if (!hits.length) { saveScaleSeen(); return; }
+
+  // One message per scale, nearest truck first — the same shape as the weather
+  // alerts, because the same person reads them.
+  for (const g of scales.group(hits)) {
+    // Straight-line miles, deliberately: this is a heads-up at a hundred
+    // miles, where the road's own winding changes nothing a dispatcher would
+    // do differently, and routing every truck inside every ring would be
+    // hundreds of calls a minute to a service that rate-limits.
+    const lines = g.units.map((h) => {
+      const driver = h.driver && h.driver !== "Unassigned" ? ` (${tgEsc(h.driver)})` : "";
+      return `• <b>Unit ${tgEsc(h.unit)}${driver}</b> — <b>${h.mi} mi</b>${h.location ? ` · ${tgEsc(h.location)}` : ""}`;
+    });
+    const map = `https://www.google.com/maps?q=${g.scale.lat},${g.scale.lon}`;
+    const text = `⚖️ <b>Scale yaqinlashdi</b>\n<b>${tgEsc(g.scale.label)}</b>` +
+      `${g.scale.mi > 0 ? ` (${g.scale.mi} mi halqa)` : ""}\n` +
+      `${g.scale.note ? `${tgEsc(g.scale.note)}\n` : ""}${lines.join("\n")}\n\n` +
+      `<a href="${map}">Scale joyi</a> — driverlarga ogohlantirish bering.`;
+    const delivered = TG_ON ? await tgSend(text) : true;
+    if (delivered) scales.markSent(scaleSeen, g.units);
+  }
+  saveScaleSeen();
 }
 
 // --- Road conditions: who is driving into what ---
@@ -2703,6 +2876,7 @@ server.listen(PORT, () => {
   console.log(`  Toll reminder:       ${TG_ON ? `Telegram ✓ (chat ${TG_CHAT})` : "board only — set TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID for Telegram"}`);
   console.log(`  Stop arrivals:       ${TG_ON ? `Telegram ✓ (${ARRIVE_MI} mi)` : "board only"}`);
   console.log(`  Yo'l sharoiti:       ${TG_ON ? `NWS har ${Math.round(WX_POLL_MS / 60000)} daq ✓` : "OFF"}`);
+  console.log(`  Scale ogohlantirish: ${scalePoints.length ? `${scalePoints.length} ta scale · ${SCALE_MI} mi halqa ✓` : "OFF — Scale tabida joy qo'shing"}`);
   console.log(`  Narx ogohlantirishi: ${TG_ON ? `chat ${TG_OWNER_CHAT}${TG_OWNER_CHAT === TG_CHAT ? " (umumiy bilan bir xil)" : " (alohida)"}` : "OFF"}`);
   console.log(`  Toll directions:     ${SHEET_ON ? `sheet har ${SHEET_POLL_MIN} daq · eslatma har ${REMIND_EVERY_MIN} daq ✓` : "OFF — set TOLL_SHEET_CSV"}\n`);
   initDurable()
@@ -2718,6 +2892,7 @@ server.listen(PORT, () => {
   setInterval(() => runTollWatch().catch((e) => console.error("tollWatch", e.message)), TOLL_WATCH_MS);
   setInterval(() => runArrivalWatch().catch((e) => console.error("arrivalWatch", e.message)), TOLL_WATCH_MS);
   setInterval(() => runPassWatch().catch((e) => console.error("passWatch", e.message)), TOLL_WATCH_MS);
+  setInterval(() => runScaleWatch().catch((e) => console.error("scaleWatch", e.message)), TOLL_WATCH_MS);
   setTimeout(() => runWeatherWatch().catch((e) => console.error("weatherWatch", e.message)), 20000);
   setInterval(() => runWeatherWatch().catch((e) => console.error("weatherWatch", e.message)), WX_POLL_MS);
 });

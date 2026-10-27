@@ -708,12 +708,15 @@ function setupTabs() {
       if (auditView) auditView.classList.toggle("hidden", view !== "audit");
       const tollView = $("#view-toll");
       if (tollView) tollView.classList.toggle("hidden", view !== "toll");
+      const scaleView = $("#view-scale");
+      if (scaleView) scaleView.classList.toggle("hidden", view !== "scale");
       if (view === "coverage") renderCoverage();
       if (view === "idle") renderIdle();
       if (view === "map") renderMap();
       if (view === "directions" && window.initDirections) window.initDirections();
       if (view === "audit" && window.initAudit) window.initAudit();
       if (view === "toll" && window.initToll) window.initToll();
+      if (view === "scale" && window.initScales) window.initScales();
     });
   });
 }

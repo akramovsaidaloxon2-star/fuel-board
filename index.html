@@ -45,6 +45,7 @@
       <button class="tab" data-view="directions"><span class="tab-ic">🛣️</span>Direction</button>
       <button class="tab" data-view="audit"><span class="tab-ic">🧾</span>Fuel audit</button>
       <button class="tab" data-view="toll"><span class="tab-ic">🛂</span>Toll</button>
+      <button class="tab" data-view="scale"><span class="tab-ic">⚖️</span>Scale</button>
     </nav>
     <div class="content-area">
 
@@ -352,6 +353,45 @@
       </section>
     </div>
 
+    <div id="view-scale" class="hidden">
+      <section class="dir-panel">
+        <div class="dir-head">
+          <h3>⚖️ Weight station ogohlantirishi</h3>
+          <span id="scale-count" class="toll-dim"></span>
+        </div>
+        <div class="dir-draft">
+          <label class="audit-ignore-label" for="scale-text">Scale joylari — har qatorga bittasi</label>
+          <textarea id="scale-text" rows="4" placeholder="I-80 Laramie WY scale | 41.31,-105.59
+Monument CO scale | 600 8th St, Monument, CO 80132 | 100 | qattiq HOS tekshiruvi
+https://www.google.com/maps/search/?api=1&amp;query=..."></textarea>
+          <button class="btn primary" type="button" id="scale-add">➕ Qo'shish</button>
+          <span id="scale-state" class="dir-draft-state"></span>
+        </div>
+
+        <div class="dir-list-wrap">
+          <table class="idle-table audit-table">
+            <thead><tr>
+              <th>Scale</th><th class="num">Halqa</th><th class="num">Koordinata</th>
+              <th>Holat</th><th>Map</th><th></th>
+            </tr></thead>
+            <tbody id="scale-rows"></tbody>
+          </table>
+          <div id="scale-empty" class="empty hidden">Ro'yxat bo'sh</div>
+        </div>
+      </section>
+
+      <section class="info-card">
+        <div class="info-icon">i</div>
+        <div>
+          <strong>Qanday ishlaydi</strong>
+          <p>Har qatorga bitta joy: <strong>Google Maps linki</strong> (manzil izlagan link ham bo'ladi), <strong>41.31,-105.59</strong> koordinatasi, yoki manzil/shahar nomi. To'liq shakli: <code>Nomi | joy | radius | izoh</code> — radius va izoh shart emas. Izoh xabarga ham qo'shiladi, masalan "LPR kameralar, Level I inspection".</p>
+          <p>Truck halqaga <strong>kirganda</strong> bot xabar beradi — scale bo'yicha guruhlab, eng yaqin truck birinchi. Xabar bir marta keladi: truck yaqinlashgan sari takrorlanmaydi, scale'dan uzoqlashib ketgandan keyin esa qaytadan tayyor bo'ladi.</p>
+          <p><strong>Faqat scale tomon ketayotgan</strong> trucklar hisobga olinadi — ortda qolgan yoki to'xtab turgani emas. Yo'nalish ELD kursidan olinadi; kurs bo'lmasa masofa qisqarayotgani bo'yicha aniqlanadi.</p>
+          <p>Standart halqa <strong>100 mil</strong>. Bu katta radius: bitta scale atrofida kuniga o'nlab truck o'tsa, shuncha xabar keladi. Ko'p bo'lib ketsa har bir scale uchun kichikroq radius (masalan 50) yozib qo'ying.</p>
+        </div>
+      </section>
+    </div>
+
     </div><!-- /content-area -->
   </main>
 
@@ -383,5 +423,6 @@
   <script src="audit.js"></script>
   <script src="toll-parse.js"></script>
   <script src="toll.js"></script>
+  <script src="scale.js"></script>
 </body>
 </html>
