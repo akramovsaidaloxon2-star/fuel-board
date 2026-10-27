@@ -106,12 +106,14 @@ if (!API_KEY) {
 const GH_TOKEN = process.env.GH_TOKEN || "";
 const GH_REPO = process.env.GH_REPO || ""; // e.g. "owner/fuel-board-data"
 const GH_ON = !!(GH_TOKEN && GH_REPO);
+// Overridable so the durable store can be driven against a stub in a test.
+const GH_API = process.env.GH_API || "https://api.github.com";
 const ghSha = {};
 const ghHeaders = () => ({ Authorization: `Bearer ${GH_TOKEN}`, "User-Agent": "fuel-board", Accept: "application/vnd.github+json" });
 async function ghLoad(file) {
   if (!GH_ON) return null;
   try {
-    const r = await fetch(`https://api.github.com/repos/${GH_REPO}/contents/${file}`, { headers: ghHeaders() });
+    const r = await fetch(`${GH_API}/repos/${GH_REPO}/contents/${file}`, { headers: ghHeaders() });
     if (r.status === 404) return undefined; // file not there yet
     if (!r.ok) { console.error("ghLoad", file, r.status); return null; }
     const j = await r.json();
@@ -132,12 +134,12 @@ async function ghPut(file, obj) {
   const doPut = async () => {
     const body = { message: `update ${file}`, content };
     if (ghSha[file]) body.sha = ghSha[file];
-    return fetch(`https://api.github.com/repos/${GH_REPO}/contents/${file}`, { method: "PUT", headers: { ...ghHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    return fetch(`${GH_API}/repos/${GH_REPO}/contents/${file}`, { method: "PUT", headers: { ...ghHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(body) });
   };
   let r = await doPut();
   if (r.status === 409 || r.status === 422) {
     try {
-      const g = await fetch(`https://api.github.com/repos/${GH_REPO}/contents/${file}`, { headers: ghHeaders() });
+      const g = await fetch(`${GH_API}/repos/${GH_REPO}/contents/${file}`, { headers: ghHeaders() });
       if (g.ok) ghSha[file] = (await g.json()).sha;
       else if (g.status === 404) delete ghSha[file]; // file gone — create fresh
     } catch {}
@@ -2445,7 +2447,24 @@ const SCALE_OPTS = {
   minMph: Math.max(+process.env.SCALE_MIN_MPH || 5, 0),
 };
 
+// An empty list is asked about again now and then, because the list can be
+// seeded into the durable store while the board is already running — and a
+// board that only looked once at boot would need a restart to notice.
+let scaleRecheck = 0;
+const SCALE_RECHECK_MS = Math.max(+process.env.SCALE_RECHECK_MS || 10 * 60000, 1000);
+
 async function runScaleWatch() {
+  if (!scalePoints.length && GH_ON && Date.now() - scaleRecheck > SCALE_RECHECK_MS) {
+    scaleRecheck = Date.now();
+    const sc = await ghLoad("scale_points.json").catch(() => null);
+    if (Array.isArray(sc) && sc.length) {
+      scalePoints = sc
+        .filter((p) => p && Number.isFinite(+p.lat) && Number.isFinite(+p.lon))
+        .map((p) => ({ ...p, id: p.id || newPointId(), lat: +p.lat, lon: +p.lon }))
+        .slice(0, MAX_SCALES);
+      console.log(`  Scale ro'yxati:      ${scalePoints.length} ta (durable repodan olindi)`);
+    }
+  }
   if (!scalePoints.length) return;              // nothing listed -> no Motive call
   let data;
   try { data = await getFuelData(); } catch { return; }
