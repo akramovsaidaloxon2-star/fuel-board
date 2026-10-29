@@ -180,6 +180,39 @@ async function gracefulShutdown(signal) {
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
+// --- What went wrong, written where it can be read afterwards ---
+// A board that dies on one bad request and comes back five minutes later
+// leaves nothing behind to explain itself — the operator sees a 502 email and
+// that is all. These keep the last failures in the durable repo, the same way
+// the Telegram diagnosis is kept, so the next outage can be read rather than
+// guessed at.
+const ERR_STORE = path.join(__dirname, "error_log.json");
+let errorLog = [];
+try { errorLog = JSON.parse(fs.readFileSync(ERR_STORE, "utf8")); } catch { errorLog = []; }
+function recordError(kind, err, where) {
+  const e = {
+    at: new Date().toISOString(),
+    kind,
+    where: String(where || "").slice(0, 200),
+    message: String((err && err.message) || err).slice(0, 300),
+    stack: String((err && err.stack) || "").split("\n").slice(1, 4).map((l) => l.trim()).join(" | ").slice(0, 400),
+    commit: (process.env.RENDER_GIT_COMMIT || "").slice(0, 7),
+  };
+  console.error(`\u2717 ${kind}${e.where ? ` [${e.where}]` : ""}: ${e.message}`);
+  errorLog = [e, ...errorLog].slice(0, 40);
+  try { fs.writeFileSync(ERR_STORE, JSON.stringify(errorLog)); } catch { /* disk is not the point */ }
+  ghSave("error_log.json", errorLog);
+  return e;
+}
+
+// Node ends the process on an unhandled rejection, which is how a single
+// failed fetch inside a request becomes a five-minute outage for a fleet on
+// the road. Staying up with one broken request logged is the better trade:
+// nothing here holds half-written state in memory, every save writes a whole
+// file, and Render still restarts the process if it truly wedges.
+process.on("unhandledRejection", (e) => recordError("unhandledRejection", e, ""));
+process.on("uncaughtException", (e) => recordError("uncaughtException", e, ""));
+
 // --- Simple in-memory cache so we don't hammer the Motive API ---
 let cache = { data: null, at: 0 };
 const CACHE_MS = 45 * 1000;
@@ -1587,7 +1620,7 @@ async function runDirectionReminders() {
 }
 
 // --- Server ---
-const server = http.createServer(async (req, res) => {
+async function handleRequest(req, res) {
   // Public health check for uptime pingers (keeps the free instance awake).
   if (req.url === "/health" || req.url === "/ping") {
     res.writeHead(200, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
@@ -2064,6 +2097,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   // --- Telegram setup helpers (never return the token itself) ---
+  // What has gone wrong lately, newest first.
+  if (req.url === "/api/errors") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, count: errorLog.length, errors: errorLog.slice(0, 20) }, null, 1));
+    return;
+  }
+
   if (req.url === "/api/telegram/status") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true, on: TG_ON, tokenSet: !!TG_TOKEN, chatSet: !!TG_CHAT, diag: tgDiag }));
@@ -2322,6 +2362,18 @@ const server = http.createServer(async (req, res) => {
   }
 
   serveStatic(req, res);
+}
+
+// One place where a failed request stops being fatal. Whatever it was — a
+// malformed upload, a service that answered with nonsense, a bug — the caller
+// gets a 500 and every other truck on the board carries on.
+const server = http.createServer((req, res) => {
+  handleRequest(req, res).catch((e) => {
+    recordError("request", e, `${req.method} ${String(req.url).split("?")[0]}`);
+    if (res.headersSent) { try { res.end(); } catch {} return; }
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: "server xatosi — qayta urinib ko'ring" }));
+  });
 });
 
 // Load durable data from the private GitHub repo on startup (overrides the
@@ -2379,6 +2431,8 @@ async function initDurable() {
     }
     const ss = await ghLoad("scale_seen.json");
     if (ss && typeof ss === "object" && !Array.isArray(ss)) scaleSeen = ss;
+    const el = await ghLoad("error_log.json");
+    if (Array.isArray(el)) errorLog = [...errorLog, ...el].slice(0, 40);
     console.log(`  Durable store:       GitHub ${GH_REPO} ✓`);
     if (scalePoints.length) console.log(`  Scale ro'yxati:      ${scalePoints.length} ta (durable repodan)`);
   }
