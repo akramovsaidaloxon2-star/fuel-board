@@ -710,6 +710,8 @@ function setupTabs() {
       if (tollView) tollView.classList.toggle("hidden", view !== "toll");
       const scaleView = $("#view-scale");
       if (scaleView) scaleView.classList.toggle("hidden", view !== "scale");
+      const teamView = $("#view-team");
+      if (teamView) teamView.classList.toggle("hidden", view !== "team");
       if (view === "coverage") renderCoverage();
       if (view === "idle") renderIdle();
       if (view === "map") renderMap();
@@ -717,6 +719,7 @@ function setupTabs() {
       if (view === "audit" && window.initAudit) window.initAudit();
       if (view === "toll" && window.initToll) window.initToll();
       if (view === "scale" && window.initScales) window.initScales();
+      if (view === "team" && window.initTeam) window.initTeam();
     });
   });
 }

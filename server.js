@@ -54,11 +54,58 @@ const USERS = (() => {
   return out;
 })();
 
+// The same logins, but owned by the board instead of the host. Setting USERS
+// on the hosting panel has failed twice in a row and left every fuel stop
+// recorded as "manager", so the list lives in the durable repo where the
+// board itself can add to it and nothing is lost on a deploy.
+//
+// Passwords are never stored: a random salt and a scrypt hash are, so the
+// file is useless to anyone who gets hold of it.
+const DISPATCH_STORE = path.join(__dirname, "dispatchers.json");
+let dispatchers = {};   // { name: { salt, hash, role, by, at, lastSeen } }
+try { dispatchers = JSON.parse(fs.readFileSync(DISPATCH_STORE, "utf8")); } catch { dispatchers = {}; }
+let dispTimer = null;
+function saveDispatchers() {
+  clearTimeout(dispTimer);
+  dispTimer = setTimeout(() => {
+    fs.writeFile(DISPATCH_STORE, JSON.stringify(dispatchers), () => {});
+    ghSave("dispatchers.json", dispatchers);
+  }, 1500);
+}
+function hashPass(pass, salt) {
+  return crypto.scryptSync(String(pass), salt, 32).toString("hex");
+}
+function setDispatcher(name, pass, by) {
+  const salt = crypto.randomBytes(16).toString("hex");
+  dispatchers[name] = {
+    salt, hash: hashPass(pass, salt), role: "dispatcher",
+    by: by || "", at: new Date().toISOString(),
+    lastSeen: (dispatchers[name] || {}).lastSeen || null,
+  };
+  saveDispatchers();
+}
+// Compared the slow way on purpose: a fast compare leaks, one character at a
+// time, how much of a password was right.
+function checkDispatcher(name, pass) {
+  const d = dispatchers[name];
+  if (!d || !d.salt || !d.hash) return null;
+  const a = Buffer.from(hashPass(pass, d.salt), "hex");
+  const b = Buffer.from(d.hash, "hex");
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  return { user: name, role: d.role || "dispatcher" };
+}
+
 const AUTH_ON = !!(AUTH_USER && AUTH_PASS) || !!(MANAGER_USER && MANAGER_PASS) || Object.keys(USERS).length > 0;
 
 // Validate a username/password -> { user, role }, or null.
 function userFor(u, p) {
   if (USERS[u] && USERS[u] === p) return { user: u, role: "manager" };
+  const d = checkDispatcher(u, p);
+  if (d) {
+    dispatchers[u].lastSeen = new Date().toISOString();
+    saveDispatchers();
+    return d;
+  }
   if (MANAGER_USER && u === MANAGER_USER && p === MANAGER_PASS) return { user: u, role: "manager" };
   if (AUTH_USER && u === AUTH_USER && p === AUTH_PASS) return { user: u, role: "manager" };
   return null;
@@ -85,9 +132,12 @@ function verifyToken(tok) {
   const bar = head.indexOf("|");
   const user = bar >= 0 ? head.slice(0, bar) : "";
   const role = bar >= 0 ? head.slice(bar + 1) : head;
-  // Cookies issued to the retired seats stop verifying here, so those sessions
-  // land back on the login page instead of holding access that no longer exists.
-  if (role !== "manager") return null;
+  // Cookies issued to the retired worker and ops seats stop verifying here, so
+  // those sessions land back on the login page instead of holding access that
+  // no longer exists. Dispatchers are a real seat and belong on the list:
+  // they see the same board, and the point of their own login is that the
+  // board can record whose plan a fuel stop was.
+  if (role !== "manager" && role !== "dispatcher") return null;
   return { user, role };
 }
 function getCookie(req, name) {
@@ -95,7 +145,10 @@ function getCookie(req, name) {
   return m ? decodeURIComponent(m[1]) : null;
 }
 function sessionRole(req) {
-  if (!AUTH_ON) return { user: "local", role: "manager" }; // open (local dev) -> full
+  // Accounts added from the board count as well: adding one must close the
+  // door, or a board that was open for local development stays open after
+  // the first dispatcher is created.
+  if (!AUTH_ON && !Object.keys(dispatchers).length) return { user: "local", role: "manager" };
   return verifyToken(getCookie(req, "mvx_session"));
 }
 if (!API_KEY) {
@@ -506,6 +559,30 @@ function saveScaleSeen() {
     fs.writeFile(SCALE_SEEN_STORE, JSON.stringify(scaleSeen), () => {});
     ghSave("scale_seen.json", scaleSeen);
   }, 10000);
+}
+
+// --- Every fuel stop that was ever planned, and how good it was ---
+// The assignment itself is cleared the moment the truck fuels, so judging a
+// dispatcher a week later needs the decision kept at the moment it was made:
+// who chose it, what that station cost then, and whether a cheaper one was
+// within reach. Prices move, so recomputing later answers a different
+// question than the one that was in front of the dispatcher.
+const PLAN_STORE = path.join(__dirname, "fuel_plans.json");
+let fuelPlans = [];
+try { fuelPlans = JSON.parse(fs.readFileSync(PLAN_STORE, "utf8")); } catch { fuelPlans = []; }
+const MAX_PLANS = 3000;
+let planTimer = null;
+function savePlans() {
+  clearTimeout(planTimer);
+  planTimer = setTimeout(() => {
+    fs.writeFile(PLAN_STORE, JSON.stringify(fuelPlans), () => {});
+    ghSave("fuel_plans.json", fuelPlans);
+  }, 2000);
+}
+function recordPlan(entry) {
+  fuelPlans.unshift(entry);
+  if (fuelPlans.length > MAX_PLANS) fuelPlans.length = MAX_PLANS;
+  savePlans();
 }
 
 let tpBoardCache = { data: null, at: 0 };
@@ -1889,6 +1966,29 @@ async function handleRequest(req, res) {
         TG_OWNER_CHAT
       ).catch(() => {});
     }
+    // The decision, kept as it stood. "checked" says the comparison actually
+    // ran: a stop with no advice because Motive was unreachable is not the
+    // same as a stop with no cheaper option, and a report that treats them
+    // alike flatters whoever was on shift during an outage.
+    const stn = dir[num];
+    const price = (priceData && priceData.prices && priceData.prices[num]) || null;
+    recordPlan({
+      at: new Date().toISOString(),
+      by: req._user || "", unit, brand, num,
+      driver: truck ? truck.driver : "",
+      fuel: truck ? truck.fuel : null,
+      city: stn.city || "", st: stn.st || "",
+      ppg: advice ? advice.assigned.ppg : price,
+      miles: advice ? advice.assigned.miles : null,
+      checked: !!truck,
+      better: advice ? {
+        num: advice.better.num, ppg: advice.better.ppg, miles: advice.better.miles,
+        side: advice.better.side, city: advice.better.city, st: advice.better.st,
+        diff: advice.diff, gallons: advice.gallons, save: advice.save,
+        onWay: advice.onWay ? { num: advice.onWay.num, ppg: advice.onWay.ppg, save: advice.onWay.save } : null,
+      } : null,
+    });
+
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true, unit, brand, station: { num, ...dir[num] }, advice }));
     return;
@@ -1912,8 +2012,13 @@ async function handleRequest(req, res) {
     let data;
     try { data = await getFuelData(); } catch (e) { data = { fleet: [] }; }
     const out = {};
-    for (const unit of Object.keys(assignments)) {
-      const a = assignments[unit];
+    // A snapshot, not the live object: this loop awaits a routing call per
+    // truck, and in those seconds a dispatcher can clear a stop or the
+    // arrival watcher can rewrite one. Reading the live map afterwards hands
+    // back an entry that is no longer there, which is what was killing the
+    // whole board before a failed request stopped being fatal.
+    for (const [unit, a] of Object.entries(assignments).map(([k, v]) => [k, v && { ...v }])) {
+      if (!a || !a.num) continue;
       const stn = (brandStations[a.brand] || {})[a.num];
       if (!stn) continue;
       const base = { brand: a.brand, brandLabel: BRAND_LABELS[a.brand] || a.brand, station: a.num, name: stn.brand, city: stn.city, st: stn.st };
@@ -1932,6 +2037,101 @@ async function handleRequest(req, res) {
   }
 
   // --- Toll reminder point: pin a spot from Google Maps, watch the miles left ---
+  // --- Who plans the fuel, and how well ---
+  if (req.url.startsWith("/api/plan-report")) {
+    const days = Math.min(Math.max(+new URL(req.url, "http://x").searchParams.get("days") || 30, 1), 365);
+    const since = new Date(Date.now() - days * 864e5).toISOString();
+    const rows = fuelPlans.filter((p) => p.at >= since);
+    const by = {};
+    for (const p of rows) {
+      const k = p.by || "(login yo'q)";
+      const d = by[k] || (by[k] = { user: k, stops: 0, checked: 0, cheaper: 0, save: 0, ppgSum: 0, ppgN: 0, worst: null });
+      d.stops++;
+      if (p.checked) d.checked++;
+      if (p.ppg) { d.ppgSum += p.ppg; d.ppgN++; }
+      if (p.better) {
+        d.cheaper++;
+        d.save += p.better.save || 0;
+        if (!d.worst || (p.better.save || 0) > (d.worst.better.save || 0)) d.worst = p;
+      }
+    }
+    const people = Object.values(by).map((d) => ({
+      ...d,
+      save: Math.round(d.save),
+      avgPpg: d.ppgN ? Math.round((d.ppgSum / d.ppgN) * 1000) / 1000 : null,
+      // Out of the stops that could be judged, how many had a cheaper option
+      // the truck could actually have reached.
+      missRate: d.checked ? Math.round((d.cheaper / d.checked) * 100) : null,
+    })).sort((a, b) => b.save - a.save);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      ok: true, days, total: rows.length, people,
+      recent: rows.slice(0, 60),
+      note: fuelPlans.length ? "" : "Hali bitta ham fuel stop yozilmagan — yozuv shu funksiya qo'yilgandan keyin boshlanadi.",
+    }));
+    return;
+  }
+
+  // --- Dispatcher accounts (manager only) ---
+  if (req.url === "/api/users" && req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      ok: true,
+      // Never the hash, never the salt: the page only needs to know who exists.
+      users: Object.keys(dispatchers).map((n) => ({
+        name: n, role: dispatchers[n].role || "dispatcher",
+        by: dispatchers[n].by || "", at: dispatchers[n].at || null, lastSeen: dispatchers[n].lastSeen || null,
+      })),
+      envUsers: Object.keys(USERS),
+      manager: req._user || "",
+    }));
+    return;
+  }
+  if (req.url === "/api/users" && req.method === "POST") {
+    if (req._role !== "manager") {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "faqat manager qo'sha oladi" }));
+      return;
+    }
+    const body = (await readBody(req)) || {};
+    const name = String(body.name || "").trim();
+    const pass = String(body.pass || "");
+    if (!USER_RE.test(name)) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "nomda faqat harf, raqam, . _ - bo'lsin (40 belgigacha)" }));
+      return;
+    }
+    if (pass.length < 6) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "parol kamida 6 belgi bo'lsin" }));
+      return;
+    }
+    if (USERS[name] || name === MANAGER_USER || name === AUTH_USER) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: `"${name}" allaqachon boshqa joyda band` }));
+      return;
+    }
+    const existed = !!dispatchers[name];
+    setDispatcher(name, pass, req._user || "");
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, name, updated: existed }));
+    return;
+  }
+  if (req.url === "/api/users/delete" && req.method === "POST") {
+    if (req._role !== "manager") {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "faqat manager o'chira oladi" }));
+      return;
+    }
+    const body = (await readBody(req)) || {};
+    const name = String(body.name || "").trim();
+    const had = !!dispatchers[name];
+    if (had) { delete dispatchers[name]; saveDispatchers(); }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: had, left: Object.keys(dispatchers).length }));
+    return;
+  }
+
   // --- Weigh stations ---
   if (req.url === "/api/scales" && req.method === "GET") {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -2433,6 +2633,10 @@ async function initDurable() {
     if (ss && typeof ss === "object" && !Array.isArray(ss)) scaleSeen = ss;
     const el = await ghLoad("error_log.json");
     if (Array.isArray(el)) errorLog = [...errorLog, ...el].slice(0, 40);
+    const dp = await ghLoad("dispatchers.json");
+    if (dp && typeof dp === "object" && !Array.isArray(dp)) dispatchers = dp;
+    const fp = await ghLoad("fuel_plans.json");
+    if (Array.isArray(fp)) fuelPlans = fp.slice(0, MAX_PLANS);
     console.log(`  Durable store:       GitHub ${GH_REPO} ✓`);
     if (scalePoints.length) console.log(`  Scale ro'yxati:      ${scalePoints.length} ta (durable repodan)`);
   }
@@ -2891,7 +3095,11 @@ async function runArrivalWatch() {
   try { data = await getFuelData(); } catch { return; }
   let changed = false;
   for (const unit of units) {
+    // The entry is re-read each time round and may be gone: this loop awaits
+    // a routing call per truck, and a dispatcher clearing a stop meanwhile
+    // would otherwise abort the whole sweep and skip every truck after it.
     const a = assignments[unit];
+    if (!a || !a.num) continue;
     const stn = (brandStations[a.brand] || {})[a.num];
     if (!stn) continue;
     const truck = data.fleet.find((x) => x.unit === unit);
@@ -2943,7 +3151,8 @@ server.listen(PORT, () => {
   console.log(`  API endpoint:        http://localhost:${PORT}/api/fuel`);
   console.log(`  Motive key:          ${API_KEY ? "loaded ✓" : "MISSING ✗"}`);
   const names = Object.keys(USERS);
-  console.log(`  Login:               ${AUTH_ON ? `on ✓ (${names.length ? names.join(", ") : MANAGER_USER || AUTH_USER})` : "OFF — set USERS for cloud"}`);
+  console.log(`  Login:               ${AUTH_ON ? `on \u2713 (${names.length ? names.join(", ") : MANAGER_USER || AUTH_USER})` : "OFF — set USERS for cloud"}`);
+  console.log(`  Dispatcherlar:       ${Object.keys(dispatchers).length ? Object.keys(dispatchers).join(", ") : "yo'q — boarddan qo'shing"}`);
   console.log(`  Stations:            Pilot ${Object.keys(brandStations.pilot).length} · Love's ${Object.keys(brandStations.loves).length} · TA/Petro ${Object.keys(brandStations.ta).length}`);
   console.log(`  Durable store:       ${GH_ON ? "configuring…" : "OFF — set GH_TOKEN/GH_REPO for permanence"}`);
   console.log(`  Toll reminder:       ${TG_ON ? `Telegram ✓ (chat ${TG_CHAT})` : "board only — set TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID for Telegram"}`);

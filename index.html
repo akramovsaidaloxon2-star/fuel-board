@@ -46,6 +46,7 @@
       <button class="tab" data-view="audit"><span class="tab-ic">🧾</span>Fuel audit</button>
       <button class="tab" data-view="toll"><span class="tab-ic">🛂</span>Toll</button>
       <button class="tab" data-view="scale"><span class="tab-ic">⚖️</span>Scale</button>
+      <button class="tab" data-view="team"><span class="tab-ic">👥</span>Bollar</button>
     </nav>
     <div class="content-area">
 
@@ -392,6 +393,74 @@ https://www.google.com/maps/search/?api=1&amp;query=..."></textarea>
       </section>
     </div>
 
+    <div id="view-team" class="hidden">
+      <section class="dir-panel">
+        <div class="dir-head">
+          <h3>👥 Kim qanday fuel plan qilyapti</h3>
+          <span id="team-sum" class="toll-dim"></span>
+        </div>
+        <div class="dir-draft">
+          <label class="audit-ignore-label" for="team-days">Davr</label>
+          <select id="team-days">
+            <option value="7">7 kun</option>
+            <option value="30" selected>30 kun</option>
+            <option value="90">90 kun</option>
+          </select>
+        </div>
+        <div id="team-note" class="audit-note hidden"></div>
+        <div class="dir-list-wrap">
+          <table class="idle-table audit-table">
+            <thead><tr>
+              <th>Kim</th><th class="num">Stop</th><th class="num">Tekshirildi</th>
+              <th class="num">Arzoni bor edi</th><th class="num">O'rtacha $/gal</th>
+              <th class="num">Ortiqcha</th><th>Eng yomon holati</th>
+            </tr></thead>
+            <tbody id="team-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="dir-panel">
+        <div class="dir-head"><h3>Oxirgi fuel stoplar</h3></div>
+        <div class="dir-list-wrap">
+          <table class="idle-table audit-table">
+            <thead><tr>
+              <th>Vaqt</th><th>Kim</th><th>Unit</th><th>Driver</th><th>Stansiya</th>
+              <th class="num">$/gal</th><th class="num">Bak</th><th>Xulosa</th>
+            </tr></thead>
+            <tbody id="team-recent"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="dir-panel">
+        <div class="dir-head"><h3>Hisoblar</h3></div>
+        <div class="dir-draft">
+          <input id="team-name" placeholder="login (masalan: jamshid)" autocomplete="off">
+          <input id="team-pass" type="text" placeholder="parol (kamida 6 belgi)" autocomplete="off">
+          <button class="btn primary" type="button" id="team-add">➕ Qo'shish</button>
+          <span id="team-state" class="dir-draft-state"></span>
+        </div>
+        <div class="dir-list-wrap">
+          <table class="idle-table audit-table">
+            <thead><tr><th>Login</th><th>Roli</th><th>Oxirgi kirgan</th><th>Qo'shilgan</th><th></th></tr></thead>
+            <tbody id="team-users"></tbody>
+          </table>
+          <div id="team-env" class="toll-dim"></div>
+        </div>
+      </section>
+
+      <section class="info-card">
+        <div class="info-icon">i</div>
+        <div>
+          <strong>Qanday o'lchanadi</strong>
+          <p>Har safar fuel stop tayinlanganda board o'sha <strong>o'sha ondagi</strong> holatni yozib qo'yadi: kim tayinladi, stansiya narxi qancha edi, truckda necha foiz yoqilg'i bor edi va o'sha yoqilg'i bilan yetib boradigan masofada <strong>arzonrog'i bormidi</strong>. Narxlar o'zgaradi, shuning uchun keyin qayta hisoblash boshqa savolga javob beradi — dispatcher ko'rgan holat saqlanadi.</p>
+          <p><strong>"Tekshirildi"</strong> — Motive o'sha paytda truck joyini bergan va taqqoslash haqiqatan ishlagan. Motive javob bermagan paytdagi stop "tekshirilmagan" bo'lib qoladi va hech kimning hisobiga yozilmaydi.</p>
+          <p>Hisoblar shu yerda ochiladi — Render sozlamasiga tegish shart emas. Parol saqlanmaydi: faqat uning scrypt xeshi yoziladi.</p>
+        </div>
+      </section>
+    </div>
+
     </div><!-- /content-area -->
   </main>
 
@@ -424,5 +493,6 @@ https://www.google.com/maps/search/?api=1&amp;query=..."></textarea>
   <script src="toll-parse.js"></script>
   <script src="toll.js"></script>
   <script src="scale.js"></script>
+  <script src="team.js"></script>
 </body>
 </html>

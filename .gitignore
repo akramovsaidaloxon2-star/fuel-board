@@ -30,3 +30,5 @@ toll_devices.json
 scale_points.json
 scale_seen.json
 error_log.json
+dispatchers.json
+fuel_plans.json
