@@ -78,7 +78,9 @@ function hashPass(pass, salt) {
 function setDispatcher(name, pass, by) {
   const salt = crypto.randomBytes(16).toString("hex");
   dispatchers[name] = {
-    salt, hash: hashPass(pass, salt), role: "dispatcher",
+    // A new password keeps the role the account had: the manager changing
+    // their own password must not demote themselves to dispatcher.
+    salt, hash: hashPass(pass, salt), role: (dispatchers[name] && dispatchers[name].role) || "dispatcher",
     by: by || "", at: new Date().toISOString(),
     lastSeen: (dispatchers[name] || {}).lastSeen || null,
   };
@@ -116,14 +118,25 @@ function checkDispatcher(name, pass) {
 const AUTH_ON = !!(AUTH_USER && AUTH_PASS) || !!(MANAGER_USER && MANAGER_PASS) || Object.keys(USERS).length > 0;
 
 // Validate a username/password -> { user, role }, or null.
+function hasBoardManager() {
+  return Object.values(dispatchers).some((d) => d && d.role === "manager" && d.hash);
+}
 function userFor(u, p) {
-  if (USERS[u] && USERS[u] === p) return { user: u, role: "manager" };
-  const d = checkDispatcher(u, p);
-  if (d) {
+  // An account the board keeps answers to its own password and nothing
+  // else. Without this, "manager" with the old password would fall through
+  // to the hosting-panel login below and still get in.
+  if (dispatchers[u]) {
+    const d = checkDispatcher(u, p);
+    if (!d) return null;
     dispatchers[u].lastSeen = new Date().toISOString();
     saveDispatchers();
     return d;
   }
+  // Once the board owns a manager account, the logins set on the hosting
+  // panel are retired: their password is the one that leaked, and leaving
+  // them live would make changing it pointless.
+  if (hasBoardManager()) return null;
+  if (USERS[u] && USERS[u] === p) return { user: u, role: "manager" };
   if (MANAGER_USER && u === MANAGER_USER && p === MANAGER_PASS) return { user: u, role: "manager" };
   if (AUTH_USER && u === AUTH_USER && p === AUTH_PASS) return { user: u, role: "manager" };
   return null;
@@ -131,7 +144,10 @@ function userFor(u, p) {
 // Signed session cookie (no DB needed). The retired seats' passwords stay in
 // the secret's recipe: dropping them would change the signing key and log
 // everyone out on deploy for no benefit.
-const SESSION_SECRET = process.env.SESSION_SECRET || (MANAGER_PASS + (process.env.WORKER_PASS || "") + AUTH_PASS + "mvx-v1");
+// The suffix is the session generation. Raising it ends every session at
+// once; it was raised when the manager password leaked to the dispatchers,
+// since a session opened with it would otherwise outlive the change.
+const SESSION_SECRET = (process.env.SESSION_SECRET || (MANAGER_PASS + (process.env.WORKER_PASS || "") + AUTH_PASS + "mvx-v1")) + "|g2";
 function sign(s) { return crypto.createHmac("sha256", SESSION_SECRET).update(s).digest("base64url"); }
 // "user|role.expiry.signature". Cookies minted before logins were split carry
 // just "role" in the first field; they stay valid with an unknown name rather
@@ -156,6 +172,10 @@ function verifyToken(tok) {
   // they see the same board, and the point of their own login is that the
   // board can record whose plan a fuel stop was.
   if (role !== "manager" && role !== "dispatcher") return null;
+  // Setting a password ends every session opened before it. Otherwise
+  // whoever already logged in with the old one stays in for thirty days.
+  const acct = dispatchers[user];
+  if (acct && acct.at && +exp - 30 * 864e5 < Date.parse(acct.at)) return null;
   return { user, role };
 }
 // Everything behind a tab a dispatcher does not get. /api/fuel, the fuel
@@ -697,6 +717,7 @@ function tgDiagSave() {
   // always reads empty and would say the accounts had not arrived when they
   // had.
   tgDiag.dispatchers = Object.keys(dispatchers);
+  tgDiag.boardManager = hasBoardManager();
   ghSave("telegram_diag.json", tgDiag);
 }
 // Messages are sent as HTML so the unit and driver can be bolded. Anything
@@ -2281,7 +2302,7 @@ async function handleRequest(req, res) {
       res.end(JSON.stringify({ ok: false, error: "parol kamida 6 belgi bo'lsin" }));
       return;
     }
-    if (USERS[name] || name === MANAGER_USER || name === AUTH_USER) {
+    if (!dispatchers[name] && (USERS[name] || name === MANAGER_USER || name === AUTH_USER)) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: `"${name}" allaqachon boshqa joyda band` }));
       return;
@@ -2300,6 +2321,13 @@ async function handleRequest(req, res) {
     }
     const body = (await readBody(req)) || {};
     const name = String(body.name || "").trim();
+    // Deleting the board's manager would quietly bring back the old login
+    // and its leaked password.
+    if (dispatchers[name] && dispatchers[name].role === "manager") {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "manager hisobini o'chirib bo'lmaydi — parolini o'zgartiring" }));
+      return;
+    }
     const had = !!dispatchers[name];
     if (had) { delete dispatchers[name]; saveDispatchers(); }
     res.writeHead(200, { "Content-Type": "application/json" });

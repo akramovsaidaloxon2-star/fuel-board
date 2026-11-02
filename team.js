@@ -18,7 +18,7 @@
         <td>${esc(u.role)}</td>
         <td>${esc(when(u.lastSeen))}</td>
         <td>${esc(u.by ? `${u.by} qo'shgan · ${when(u.at)}` : when(u.at))}</td>
-        <td><button class="btn team-del" data-name="${esc(u.name)}">O'chirish</button></td>
+        <td>${u.role === "manager" ? `<span class="toll-dim">o'chirilmaydi</span>` : `<button class="btn team-del" data-name="${esc(u.name)}">O'chirish</button>`}</td>
       </tr>`).join("") : `<tr><td colspan="5" class="toll-dim">Hali hisob qo'shilmagan — pastdan qo'shing.</td></tr>`;
       for (const b of document.querySelectorAll(".team-del")) {
         b.addEventListener("click", () => delUser(b.dataset.name, b));
