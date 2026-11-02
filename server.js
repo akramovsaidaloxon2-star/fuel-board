@@ -634,11 +634,17 @@ const tgDiag = {
   // must never land in a file that syncs to the repo. Without this, "did the
   // USERS variable take?" can only be answered by someone trying to log in.
   users: Object.keys(USERS),
-  dispatchers: Object.keys(dispatchers),
   getMe: null,
   lastSend: null,
 };
-function tgDiagSave() { ghSave("telegram_diag.json", tgDiag); }
+function tgDiagSave() {
+  // Counted here rather than when the object was built: the durable list is
+  // restored after this process starts, so a snapshot taken at load time
+  // always reads empty and would say the accounts had not arrived when they
+  // had.
+  tgDiag.dispatchers = Object.keys(dispatchers);
+  ghSave("telegram_diag.json", tgDiag);
+}
 // Messages are sent as HTML so the unit and driver can be bolded. Anything
 // interpolated in — driver names, point labels typed by dispatch — has to be
 // escaped, or a stray "&" or "<" makes Telegram reject the whole message.
