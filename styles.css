@@ -612,3 +612,7 @@ footer {
 .owner-steps { margin: 4px 0 10px 18px; padding: 0; font-size: 13px; color: var(--text-dim); line-height: 1.6; }
 .owner-row { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 8px 10px; margin: 6px 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+
+/* a cheaper pump the truck had little room for: a finding, not an alarm */
+.audit-why .warn { color: var(--low); }
+.audit-why .bad { color: var(--critical); }

@@ -80,7 +80,7 @@
           <td><b>${esc(p.user)}</b></td>
           <td class="num">${p.stops}</td>
           <td class="num">${p.checked}</td>
-          <td class="num">${p.cheaper}${p.missRate != null ? ` <span class="toll-dim">(${p.missRate}%)</span>` : ""}</td>
+          <td class="num">${p.cheaper}${p.missRate != null ? ` <span class="toll-dim">(${p.missRate}%)</span>` : ""}${p.cheaperBig ? `<div class="toll-dim">${p.cheaperBig} tasi $10+</div>` : ""}</td>
           <td class="num">${p.avgPpg == null ? "—" : "$" + p.avgPpg.toFixed(3)}</td>
           <td class="num">${p.save ? `<b class="bad">$${p.save}</b>` : "—"}</td>
           <td class="audit-why">${w ? `${esc(w.unit)} → #${esc(w.num)} $${w.ppg} · arzoni #${esc(w.better.num)} $${w.better.ppg} (${w.better.miles} mi) → $${Math.round(w.better.save)}` : ""}</td>
@@ -96,8 +96,9 @@
         <td class="num">${p.ppg == null ? "—" : "$" + p.ppg}</td>
         <td class="num">${p.fuel == null ? "—" : p.fuel + "%"}</td>
         <td class="audit-why">${p.better
-          ? `<span class="bad">arzoni bor edi:</span> #${esc(p.better.num)} $${p.better.ppg} · ${p.better.miles} mi · ~$${Math.round(p.better.save)}`
-          : (p.checked ? "✓ yo'lda arzoni yo'q edi" : "<span class=\"toll-dim\">tekshirilmagan</span>")}${
+          ? `<span class="${p.better.small ? "warn" : "bad"}">arzoni bor edi:</span> #${esc(p.better.num)} ${esc([p.better.city, p.better.st].filter(Boolean).join(", "))} $${p.better.ppg} · ${p.better.miles} mi · ` +
+            `${Math.round((p.better.diff || 0) * 100)}¢/gal arzon · ~$${Math.round(p.better.save)}${p.better.small ? " (bak to'la edi — tejov kichik)" : ""}`
+          : (p.checked ? "✓ yo'lda 10¢+ arzonrog'i yo'q edi" : "<span class=\"toll-dim\">tekshirilmagan</span>")}${
           p.trip && p.trip.offRoute ? ` <span class="bad">· yo'ldan ${p.trip.hereOff} mi chetda</span>` : ""}${
           p.basis === "heading" ? ` <span class="toll-dim">(taxmin)</span>` : ""}</td>
       </tr>`).join("") || `<tr><td colspan="8" class="toll-dim">Yozuv yo'q</td></tr>`;

@@ -2116,7 +2116,7 @@ async function handleRequest(req, res) {
     } catch { /* advice is a bonus; the assignment itself stands */ }
     // Sent out of the way to fuel is worth a word on its own, even when the
     // stop it was sent to is the cheapest thing around.
-    if (trip && trip.offRoute && !advice && truck) {
+    if (trip && trip.offRoute && (!advice || advice.small) && truck) {
       const who = req._user ? ` · ${tgEsc(req._user)}` : "";
       if (ownerChat()) tgSend(
         `↪️ <b>Fuel stop yo'ldan chetda</b>\n<b>Unit ${tgEsc(unit)}</b>${who}\n` +
@@ -2125,7 +2125,7 @@ async function handleRequest(req, res) {
         ownerChat()
       ).catch(() => {});
     }
-    if (advice && truck) {
+    if (advice && !advice.small && truck) {
       const who = req._user ? ` · ${tgEsc(req._user)}` : "";
       const driver = truck.driver && truck.driver !== "Unassigned" ? ` (${tgEsc(truck.driver)})` : "";
       if (ownerChat()) tgSend(
@@ -2171,7 +2171,7 @@ async function handleRequest(req, res) {
       better: advice ? {
         num: advice.better.num, ppg: advice.better.ppg, miles: advice.better.miles,
         side: advice.better.side, city: advice.better.city, st: advice.better.st,
-        diff: advice.diff, gallons: advice.gallons, save: advice.save,
+        diff: advice.diff, gallons: advice.gallons, save: advice.save, small: !!advice.small,
         onWay: advice.onWay ? { num: advice.onWay.num, ppg: advice.onWay.ppg, save: advice.onWay.save } : null,
       } : null,
     });
@@ -2247,6 +2247,7 @@ async function handleRequest(req, res) {
       if (p.ppg) { d.ppgSum += p.ppg; d.ppgN++; }
       if (p.better) {
         d.cheaper++;
+        if (!p.better.small) d.cheaperBig = (d.cheaperBig || 0) + 1;
         d.save += p.better.save || 0;
         if (!d.worst || (p.better.save || 0) > (d.worst.better.save || 0)) d.worst = p;
       }
@@ -3217,7 +3218,11 @@ async function runPassWatch() {
 // difference on a single fill runs to a hundred dollars and nobody can hold
 // seven hundred station prices in their head.
 const SAVE_MIN_PPG = 0.10;   // smaller gaps are not worth a message
-const SAVE_MIN_USD = 25;     // nor are small fills at a big gap
+// What a single fill must save before Telegram is bothered. It was $25,
+// which turned out to hide every gap under 17¢: on a 150-gallon tank a 13¢
+// cheaper pump can never reach $25, however empty the truck. Every gap of
+// 10¢ or more is recorded regardless; this only decides who gets pinged.
+const SAVE_MIN_USD = 10;
 const RESERVE_PCT = 15;      // never plan a truck down to fumes
 const AHEAD_DEG = 50;        // "further along the same way", not behind or sideways
 const FALLBACK_MPG = 6.5;    // fleet-typical, when a truck has not reported one
@@ -3289,18 +3294,22 @@ function cheaperAhead(unit, truck, brand, num) {
   const gallons = fillGallonsAt(capacity, truck.fuel, mpg, best.miles);
   const diff = Math.round((here.your - best.ppg) * 1000) / 1000;
   const save = Math.round(diff * gallons);
-  if (save < SAVE_MIN_USD) return null;
+  // Under the alert threshold is still a finding. A truck sent past a
+  // pump 13¢ cheaper with its tank 88% full saves little on this fill, but
+  // the choice was still the dearer one — the record keeps it, marked
+  // small, and only the Telegram alert waits for a bigger number.
+  const small = save < SAVE_MIN_USD;
   // The certain one, when it is not already the headline.
   let onWay = null;
   if (bestBefore && best !== bestBefore) {
     const g = fillGallonsAt(capacity, truck.fuel, mpg, bestBefore.miles);
     const d = Math.round((here.your - bestBefore.ppg) * 1000) / 1000;
     const sv = Math.round(d * g);
-    if (sv >= SAVE_MIN_USD) onWay = { ...bestBefore, diff: d, gallons: g, save: sv };
+    if (sv > 0) onWay = { ...bestBefore, diff: d, gallons: g, save: sv };
   }
   return {
     assigned: { num, ppg: Math.round(here.your * 1000) / 1000, miles: Math.round(hereMi), city: stn.city, st: stn.st },
-    better: best, diff, gallons, save, onWay, range: Math.round(range), capacity, mpg,
+    better: best, diff, gallons, save, onWay, range: Math.round(range), capacity, mpg, small,
   };
 }
 
@@ -3401,20 +3410,20 @@ async function adviceForTrip(unit, truck, brand, num, zip) {
   const gallons = fillGallonsAt(capacity, truck.fuel, mpg, best.along);
   const diff = Math.round((hereP.your - best.ppg) * 1000) / 1000;
   const save = Math.round(diff * gallons);
-  if (save < SAVE_MIN_USD) return { trip, advice: null };
+  const small = save < SAVE_MIN_USD;
   let onWay = null;
   if (r.before && best !== r.before) {
     const g = fillGallonsAt(capacity, truck.fuel, mpg, r.before.along);
     const d = Math.round((hereP.your - r.before.ppg) * 1000) / 1000;
     const sv = Math.round(d * g);
-    if (sv >= SAVE_MIN_USD) onWay = { ...r.before, miles: r.before.along, diff: d, gallons: g, save: sv };
+    if (sv > 0) onWay = { ...r.before, miles: r.before.along, diff: d, gallons: g, save: sv };
   }
   return {
     trip,
     advice: {
       assigned: { num, ppg: Math.round(hereP.your * 1000) / 1000, miles: r.here.along, city: stn.city, st: stn.st },
       better: { ...best, miles: best.along },
-      diff, gallons, save, onWay, range: Math.round(range), capacity, mpg, onRoute: true,
+      diff, gallons, save, onWay, range: Math.round(range), capacity, mpg, onRoute: true, small,
     },
   };
 }
