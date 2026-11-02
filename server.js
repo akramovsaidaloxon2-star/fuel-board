@@ -158,6 +158,15 @@ function verifyToken(tok) {
   if (role !== "manager" && role !== "dispatcher") return null;
   return { user, role };
 }
+// Everything behind a tab a dispatcher does not get. /api/fuel, the fuel
+// stops, the notes and the limits are deliberately absent: those are the
+// board they work on every day.
+const MANAGER_ONLY = [
+  "/api/directions", "/api/direction", "/api/fuel-audit", "/api/audit-ignore",
+  "/api/toll-match", "/api/scales", "/api/plan-report", "/api/users",
+  "/api/errors", "/api/telegram", "/webhook/debug",
+];
+
 function getCookie(req, name) {
   const m = (req.headers.cookie || "").match(new RegExp("(?:^|; )" + name + "=([^;]+)"));
   return m ? decodeURIComponent(m[1]) : null;
@@ -1798,6 +1807,21 @@ async function handleRequest(req, res) {
   }
   req._role = sess.role;
   req._user = sess.user;
+
+  // A dispatcher plans fuel: the board, the map, idle and sensor coverage.
+  // The rest — reports, audits, the scale list, the accounts — is the
+  // manager's. Hiding the tabs is not enough on its own; anyone who knows the
+  // address could call these straight, so the door is here rather than in
+  // the page.
+  if (req._role !== "manager") {
+    const url = req.url.split("?")[0];
+    const shut = MANAGER_ONLY.some((p) => url === p || url.startsWith(p + "/"));
+    if (shut) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "bu bo'lim faqat manager uchun" }));
+      return;
+    }
+  }
 
   // Protected: inspect what Motive has been sending.
   if (req.url === "/webhook/debug") {

@@ -815,6 +815,19 @@ if (priceFileInput) priceFileInput.addEventListener("change", (e) => { if (e.tar
 // its banner belong to the manager along with everything else.
 fetch("/api/me").then((r) => r.json()).then((j) => {
   ROLE = j.role || "manager";
+  // A dispatcher's board is the four views they work in. The others are the
+  // manager's, and the server refuses them anyway — leaving the tabs up would
+  // only hand someone a row of buttons that answer "faqat manager uchun".
+  if (ROLE !== "manager") {
+    for (const v of ["directions", "audit", "toll", "scale", "team"]) {
+      const tab = document.querySelector(`.tab[data-view="${v}"]`);
+      if (tab) tab.remove();
+      const view = document.querySelector(`#view-${v}`);
+      if (view) view.remove();
+    }
+    const tg = document.querySelector("#tg-test");
+    if (tg) tg.remove();
+  }
   // Whose session this is. Shown because the board now records who assigns
   // what, and anyone acting on it should be able to see which name that is.
   if (j.user) {
