@@ -441,6 +441,7 @@ function recordFill(unit, t, from, to, loc) {
     last.endAt = new Date(t).toISOString();
     last.pct = Math.round((last.to - last.from) * 10) / 10;
     if (last.lat == null && lat != null) { last.lat = lat; last.lon = lon; }
+    caFillOnPlan(unit, last);
     saveFuelEvents();
     return;
   }
@@ -451,6 +452,7 @@ function recordFill(unit, t, from, to, loc) {
     pct: Math.round((to - from) * 10) / 10,
     lat, lon,
   });
+  caFillOnPlan(unit, arr[arr.length - 1]);
   const cutoff = Date.now() - 180 * 864e5;
   while (arr.length && new Date(arr[0].at).getTime() < cutoff) arr.shift();
   saveFuelEvents();
@@ -556,6 +558,7 @@ function migrateAssignments() {
       // these on a restart would quietly turn every trip back into a guess.
       if (v.zip) next.zip = v.zip;
       if (v.fueledAt) next.fueledAt = v.fueledAt;
+      if (v.ca && v.ca.exit) next.ca = v.ca;
       assignments[u] = next;
     }
     else delete assignments[u];
@@ -675,6 +678,113 @@ function recordPlan(entry) {
   fuelPlans.unshift(entry);
   if (fuelPlans.length > MAX_PLANS) fuelPlans.length = MAX_PLANS;
   savePlans();
+}
+
+// --- California: buy only what gets the truck back out ---
+// CA diesel runs well over a dollar above the states around it. A truck sent
+// to a CA stop should take enough to reach the delivery and the first cheap
+// pump over the line, plus a reserve — and fill up there. Filling to the top
+// in CA is paying the CA price for fuel that will be burned in Arizona.
+const DEAR_STATES = ["CA"];
+const CA_SETTLE_MS = +process.env.CA_SETTLE_MS || FILL_MERGE_MS;
+
+function pilotPriced() {
+  const prices = (priceData && priceData.prices) || {};
+  const out = [];
+  for (const n of Object.keys(prices)) {
+    const sn = (brandStations.pilot || {})[n], pr = prices[n];
+    if (sn && pr && typeof pr.your === "number" && sn.lat != null) {
+      out.push({ num: n, lat: sn.lat, lon: sn.lon, ppg: pr.your, city: sn.city, st: sn.st });
+    }
+  }
+  return out;
+}
+
+// Returns null for any stop outside the dear states, or when the numbers to
+// plan on are missing — a CA stop with no plan is just an ordinary stop.
+async function caPlanFor(unit, truck, brand, num, zip, trip) {
+  if (brand !== "pilot" || !truck || truck.fuel == null || truck.lat == null) return null;
+  const stn = (brandStations.pilot || {})[num];
+  if (!stn || !DEAR_STATES.includes(String(stn.st || "").toUpperCase())) return null;
+  const pr = priceData && priceData.prices && priceData.prices[num];
+  if (!pr || typeof pr.your !== "number") return null;
+  const dest = await zipPoint(zip);
+  if (!dest) return null;
+  const { capacity, mpg } = tankRange(unit, truck);
+  const exit = routeFuel.exitStation(pilotPriced(), dest, { dearPpg: pr.your, mpg, dearStates: DEAR_STATES });
+  if (!exit) return null;
+  // The road when it was worked out; straight line with a road factor
+  // otherwise. Either is close enough to say 25 gallons rather than 105.
+  const toStopMi = trip ? trip.hereAlong : Math.round(haversineMiles(truck.lat, truck.lon, stn.lat, stn.lon) * 1.2);
+  const stopToDestMi = trip ? Math.max(0, trip.miles - trip.hereAlong) : Math.round(haversineMiles(stn.lat, stn.lon, dest.lat, dest.lon) * 1.2);
+  const pf = routeFuel.partialFill({
+    capacity, mpg, fuelPct: truck.fuel, toStopMi, stopToDestMi, destToExitMi: exit.miles, reservePct: RESERVE_PCT,
+  });
+  const gap = Math.round((pr.your - exit.ppg) * 1000) / 1000;
+  return {
+    st: stn.st, ppg: Math.round(pr.your * 1000) / 1000, capacity, mpg: Math.round(mpg * 10) / 10,
+    fuel: truck.fuel, toStopMi, stopToDestMi,
+    ...pf,
+    exit: { num: exit.num, city: exit.city, st: exit.st, ppg: exit.ppg, miles: exit.miles },
+    gap,
+    // What filling to the top would throw away, priced now so the owner sees
+    // the stake before the truck gets there.
+    fullCost: Math.round(pf.excessGal * gap),
+  };
+}
+
+// Gallons to buy given what is needed and what is in the tank, rounded up
+// to five so it reads off a pump.
+function caGallons(needGal, fuelPct, capacity) {
+  const have = (fuelPct / 100) * capacity;
+  return Math.min(Math.round(capacity - have), Math.ceil(Math.max(0, needGal - have) / 5) * 5);
+}
+
+// After the fill: how much went in, against how much was needed.
+function caFillOnPlan(unit, ev) {
+  const t = Date.parse(ev.endAt || ev.at);
+  // Only the newest plan for the unit — a fill belongs to the stop the
+  // truck was last sent to, not to one it was sent to before that.
+  const p = fuelPlans.find((x) => x.unit === unit);
+  if (!p || !p.ca || p.ca.done) return;
+  const pAt = Date.parse(p.at);
+  if (!(t >= pAt) || t - pAt > 3 * 864e5) return;
+  p.ca.fill = { at: ev.at, endAt: ev.endAt, from: ev.from, to: ev.to, lat: ev.lat, lon: ev.lon };
+  savePlans();
+}
+
+function settleCaChecks(now) {
+  const t0 = now || Date.now();
+  let changed = false;
+  for (const p of fuelPlans.slice(0, 200)) {
+    const c = p.ca;
+    if (!c || c.done || !c.fill) continue;
+    if (t0 - Date.parse(c.fill.endAt || c.fill.at) < CA_SETTLE_MS) continue;
+    const gotGal = Math.round(((c.fill.to - c.fill.from) / 100) * c.capacity);
+    // Judged on the level the truck really pulled in with, not the guess
+    // made when the stop was assigned — traffic and idling move it.
+    const needNow = caGallons(c.needGal, c.fill.from, c.capacity);
+    const overGal = Math.max(0, gotGal - needNow);
+    const overCost = Math.round(overGal * c.gap);
+    const stn = (brandStations[p.brand] || {})[p.num];
+    const away = stn && c.fill.lat != null ? Math.round(haversineMiles(c.fill.lat, c.fill.lon, stn.lat, stn.lon)) : null;
+    Object.assign(c, { done: true, gotGal, needNow, overGal, overCost, away, checkedAt: new Date(t0).toISOString() });
+    changed = true;
+    if (overCost >= SAVE_MIN_USD && ownerChat()) {
+      const where = [p.city, p.st].filter(Boolean).join(", ");
+      tgSend(
+        `🌴 <b>CA'da ortiqcha olindi</b>\n<b>Unit ${tgEsc(p.unit)}</b>${p.driver ? ` (${tgEsc(p.driver)})` : ""}${p.by ? ` · ${tgEsc(p.by)}` : ""}\n` +
+        `#${tgEsc(p.num)} ${tgEsc(where)} — <b>$${c.ppg}</b>/gal\n` +
+        `Kerak edi: <b>~${needNow} gal</b> · olindi: <b>~${gotGal} gal</b> (${c.fill.from}% → ${c.fill.to}%)\n` +
+        `Ortiqcha <b>~${overGal} gal</b> × ${Math.round(c.gap * 100)}¢ = <b>~$${overCost}</b> yo'qotildi\n` +
+        `To'ldirish joyi edi: #${tgEsc(c.exit.num)} ${tgEsc([c.exit.city, c.exit.st].filter(Boolean).join(", "))} — $${c.exit.ppg} · ~${c.exit.miles} mi` +
+        (away != null && away > 10 ? `\n⚠️ Yoqilg'i stopdan ${away} mi narida olingan` : ""),
+        ownerChat()
+      ).catch(() => {});
+    }
+  }
+  if (changed) savePlans();
+  return changed;
 }
 
 let tpBoardCache = { data: null, at: 0 };
@@ -2114,6 +2224,25 @@ async function handleRequest(req, res) {
         if (!trip) advice = cheaperAhead(unit, truck, brand, num);
       }
     } catch { /* advice is a bonus; the assignment itself stands */ }
+    let ca = null;
+    try { ca = await caPlanFor(unit, truck, brand, num, zip, trip); } catch { ca = null; }
+    // How much to buy is an instruction, not a verdict: it goes on the board
+    // for whoever is talking to the driver. What over-buying cost stays with
+    // the owner.
+    if (ca && assignments[unit] && assignments[unit].num === num) {
+      assignments[unit].ca = { recGal: ca.recGal, needGal: ca.needGal, capacity: ca.capacity, exit: ca.exit };
+      saveAssignments();
+    }
+    if (ca && ca.fullCost >= SAVE_MIN_USD && truck && ownerChat()) {
+      tgSend(
+        `🌴 <b>CA stop</b>\n<b>Unit ${tgEsc(unit)}</b>${req._user ? ` · ${tgEsc(req._user)}` : ""}\n` +
+        `#${tgEsc(num)} ${tgEsc([dir[num].city, dir[num].st].filter(Boolean).join(", "))} — <b>$${ca.ppg}</b>/gal · hozir ${truck.fuel}%\n` +
+        `Kerak: <b>~${ca.recGal} gal</b> (yetib kelganda ~${ca.arriveGal} gal bo'ladi)\n` +
+        `Keyin to'ldirish: #${tgEsc(ca.exit.num)} ${tgEsc([ca.exit.city, ca.exit.st].filter(Boolean).join(", "))} — <b>$${ca.exit.ppg}</b> · ~${ca.exit.miles} mi\n` +
+        `To'liq to'ldirsa ~${ca.excessGal} gal ortiqcha → <b>~$${ca.fullCost}</b>`,
+        ownerChat()
+      ).catch(() => {});
+    }
     // Sent out of the way to fuel is worth a word on its own, even when the
     // stop it was sent to is the cheapest thing around.
     if (trip && trip.offRoute && (!advice || advice.small) && truck) {
@@ -2174,6 +2303,7 @@ async function handleRequest(req, res) {
         diff: advice.diff, gallons: advice.gallons, save: advice.save, small: !!advice.small,
         onWay: advice.onWay ? { num: advice.onWay.num, ppg: advice.onWay.ppg, save: advice.onWay.save } : null,
       } : null,
+      ca,
     });
 
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -2182,6 +2312,7 @@ async function handleRequest(req, res) {
     // never showed it, and now the answer does not carry it either.
     const mine = req._role === "manager";
     res.end(JSON.stringify({ ok: true, unit, brand, zip, station: { num, ...dir[num] },
+      ca: ca ? { recGal: ca.recGal, exit: ca.exit } : null,
       advice: mine ? advice : undefined, trip: mine ? trip : undefined }));
     return;
   }
@@ -2245,6 +2376,10 @@ async function handleRequest(req, res) {
       d.stops++;
       if (p.checked) d.checked++;
       if (p.ppg) { d.ppgSum += p.ppg; d.ppgN++; }
+      if (p.ca && p.ca.done) {
+        d.caChecked = (d.caChecked || 0) + 1;
+        if (p.ca.overCost >= SAVE_MIN_USD) { d.caOver = (d.caOver || 0) + 1; d.caLost = (d.caLost || 0) + p.ca.overCost; }
+      }
       if (p.better) {
         d.cheaper++;
         if (!p.better.small) d.cheaperBig = (d.cheaperBig || 0) + 1;
@@ -3333,21 +3468,41 @@ async function zipPoint(zip) {
   if (!routeFuel.ZIP_RE.test(String(zip || ""))) return null;
   const hit = zipGeo[zip];
   if (hit && hit.lat != null) return hit;
-  if (hit && hit.miss && Date.now() - Date.parse(hit.at || 0) < 7 * 864e5) return null;
-  try {
-    const url = `${GEOCODE_URL}?format=jsonv2&limit=1&countrycodes=us&postalcode=${zip}`;
-    const r = await fetch(url, {
-      headers: { "User-Agent": "movex-fuel-board/1.0 (fleet dispatch board)", Accept: "application/json" },
-      signal: AbortSignal.timeout(12000),
-    });
-    const j = r.ok ? await r.json() : null;
-    const h = Array.isArray(j) ? j[0] : null;
-    if (h && h.lat != null && h.lon != null) {
-      zipGeo[zip] = { lat: +h.lat, lon: +h.lon, label: String(h.display_name || zip).split(",").slice(0, 2).join(",").trim() };
-    } else zipGeo[zip] = { miss: true, at: new Date().toISOString() };
-    saveZipGeo();
-  } catch { return null; }   // a timeout is not a verdict on the ZIP — ask again next time
-  return zipGeo[zip] && zipGeo[zip].lat != null ? zipGeo[zip] : null;
+  // A miss is only trusted for a day, and only if it came from the full set
+  // of questions below. The first version asked one way only and kept the
+  // answer a week — 90670 in Santa Fe Springs came back empty and every LA
+  // delivery would have been judged on a guess until it expired.
+  if (hit && hit.miss && hit.v === 2 && Date.now() - Date.parse(hit.at || 0) < 864e5) return null;
+  // The geocoder's postal-code index has holes. A free-text search finds
+  // most of what the structured one misses, so it is asked three ways
+  // before the ZIP is called unknown.
+  const asks = [
+    `postalcode=${zip}&countrycodes=us`,
+    `q=${encodeURIComponent(zip + ", USA")}&countrycodes=us`,
+    `q=${encodeURIComponent(zip)}&countrycodes=us`,
+  ];
+  let answered = false;
+  for (const a of asks) {
+    try {
+      const r = await fetch(`${GEOCODE_URL}?format=jsonv2&limit=1&${a}`, {
+        headers: { "User-Agent": "movex-fuel-board/1.0 (fleet dispatch board)", Accept: "application/json" },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!r.ok) continue;
+      answered = true;
+      const j = await r.json();
+      const h = Array.isArray(j) ? j[0] : null;
+      if (h && h.lat != null && h.lon != null) {
+        zipGeo[zip] = { lat: +h.lat, lon: +h.lon, label: String(h.display_name || zip).split(",").slice(0, 2).join(",").trim() };
+        saveZipGeo();
+        return zipGeo[zip];
+      }
+    } catch { /* a timeout is not a verdict on the ZIP */ }
+  }
+  // Only a service that answered and found nothing makes a miss worth
+  // keeping; an outage is not evidence about the ZIP.
+  if (answered) { zipGeo[zip] = { miss: true, v: 2, at: new Date().toISOString() }; saveZipGeo(); }
+  return null;
 }
 
 // The road from the truck to the delivery. Car routing, so it knows nothing
@@ -3448,10 +3603,21 @@ const FUELED_MIN_PCT = 3;
 // How many gallons to put in: the standing limit for the unit when there is
 // one, and what the tank has room for — its measured capacity against the
 // level it rolled in on. Dispatch should not have to work this out at the pump.
-function fillAdvice(unit, truck) {
+function fillAdvice(unit, truck, ca) {
   const lines = [];
   if (truck.gallonLimit) lines.push(`Limit: <b>${truck.gallonLimit} gal</b>`);
   const cap = audit.estimateCapacity(fuelTxns[unit] || [], fuelEvents[unit] || []);
+  // At a CA stop the number that matters is how little to take, worked out
+  // from the level the truck actually rolled in on.
+  if (ca && ca.needGal != null && truck.fuel != null) {
+    const c = ca.capacity || cap || 150;
+    const g = caGallons(ca.needGal, truck.fuel, c);
+    lines.push(g > 0
+      ? `🌴 CA: faqat <b>~${g} gal</b> oling (to'ldirmang)`
+      : `🌴 CA: bakda yetarli — <b>olmasa ham bo'ladi</b>`);
+    lines.push(`To'ldirish: #${tgEsc(ca.exit.num)} ${tgEsc([ca.exit.city, ca.exit.st].filter(Boolean).join(", "))} — $${ca.exit.ppg} · ~${ca.exit.miles} mi`);
+    return "\n" + lines.join("\n");
+  }
   if (cap && truck.fuel != null) {
     const room = Math.round((cap * (100 - truck.fuel)) / 100);
     if (room > 0) lines.push(`To'ldirish uchun: <b>~${room} gal</b> (bak ~${cap} gal)`);
@@ -3494,6 +3660,7 @@ async function reportIfMissed(unit, a, truck, stop, driver, milesAway) {
 }
 
 async function runArrivalWatch() {
+  settleCaChecks();
   const units = Object.keys(assignments);
   if (!units.length) return;               // nothing assigned -> no Motive call
   let data;
@@ -3527,7 +3694,7 @@ async function runArrivalWatch() {
     if (miles <= ARRIVE_MI && !a.arrivedAt) {
       const fuel = truck.fuel != null ? `\nYoqilg'i: <b>${truck.fuel}%</b>` : "";
       const text = `⛽ <b>Truck stopga yetib keldi</b>\n<b>Unit ${tgEsc(unit)}${driver}</b>\n` +
-        `${stop}${fuel}${fillAdvice(unit, truck)}`;
+        `${stop}${fuel}${fillAdvice(unit, truck, a.ca)}`;
       // Marked only once Telegram has it, same rule as the toll reminder: a
       // failed send retries on the next tick instead of being lost.
       const delivered = TG_ON ? await tgSend(text) : true;

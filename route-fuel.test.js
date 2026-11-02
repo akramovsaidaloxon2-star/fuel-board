@@ -73,5 +73,28 @@ eq(R.ZIP_RE.test("7910"), false, "4 raqam — yo'q");
 eq(R.ZIP_RE.test("79101-1234"), false, "ZIP+4 — faqat 5 raqam");
 eq(R.cheaperOnRoute(null, stations, here, {}), null, "yo'l yo'q — javob yo'q");
 
+console.log("\n=== 8. CA: faqat kerakligicha olish");
+// Rialto CA, $7.59; yuk Santa Fe Springs (90670); chiqish — Ehrenberg AZ
+const dest = { lat: 33.94, lon: -118.08 };
+const pool = [
+  { num: "1328", st: "CA", city: "Rialto", lat: 34.10, lon: -117.37, ppg: 7.59 },
+  { num: "381", st: "CA", city: "Hesperia", lat: 34.43, lon: -117.38, ppg: 7.30 },     // CA — chiqish emas
+  { num: "608", st: "AZ", city: "Ehrenberg", lat: 33.60, lon: -114.52, ppg: 5.90 },    // eng yaqin arzoni
+  { num: "513", st: "NV", city: "Jean", lat: 35.78, lon: -115.32, ppg: 6.80 },         // NV — farqi yetarli, lekin uzoqroq
+  { num: "999", st: "AZ", city: "Kingman", lat: 35.19, lon: -114.05, ppg: 7.40 },      // AZ, lekin farqi 19¢ — kam
+];
+const ex = R.exitStation(pool, dest, { dearPpg: 7.59 });
+eq(ex && ex.num, "608", "chiqish stansiyasi: Ehrenberg AZ");
+near(ex.miles, 245, 25, "yuk joyidan ~245 mil (yo'l)");
+eq(R.exitStation(pool, dest, { dearPpg: 6.10 }), null, "farq 40¢ dan kam bo'lsa chiqish yo'q");
+
+const pf = R.partialFill({ capacity: 150, mpg: 6.5, fuelPct: 32.4, toStopMi: 20, stopToDestMi: 45, destToExitMi: ex.miles });
+// yetib kelganda ~45 gal; kerak (45+245)/6.5 + 22.5 ≈ 67 gal → ~25 gal olish kifoya
+near(pf.arriveGal, 45, 2, "Rialto'ga ~45 gal bilan yetib keladi");
+eq(pf.recGal, 25, "CA'da faqat 25 gal olish kerak");
+near(pf.fillGal, 105, 2, "to'ldirsa ~105 gal oladi");
+near(pf.excessGal, 80, 2, "ya'ni ~80 gal ortiqcha");
+eq(R.partialFill({ capacity: 150, mpg: 6.5, fuelPct: 95, toStopMi: 5, stopToDestMi: 45, destToExitMi: 245 }).recGal, 0, "bak to'la bo'lsa CA'da olish shart emas");
+
 console.log(fail ? `\n${fail} ta xato` : "\nHammasi o'tdi");
 process.exit(fail ? 1 : 0);

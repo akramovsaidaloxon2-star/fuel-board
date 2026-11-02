@@ -66,6 +66,16 @@
     } finally { btn.disabled = false; }
   }
 
+  // California stops: what was needed, what went in.
+  function caNote(c) {
+    if (!c) return "";
+    const exit = c.exit ? `#${esc(c.exit.num)} ${esc(c.exit.st || "")} $${esc(c.exit.ppg)}` : "";
+    if (!c.done) return `<div class="toll-dim">🌴 CA: ~${esc(c.recGal)} gal kerak · to'ldirish ${exit} · natija yoqilg'i olingach</div>`;
+    return c.overCost >= 10
+      ? `<div><span class="bad">🌴 CA ortiqcha:</span> kerak ~${esc(c.needNow)} gal, olindi ~${esc(c.gotGal)} gal → ~${esc(c.overGal)} gal × ${Math.round(c.gap * 100)}¢ = <b class="bad">$${esc(c.overCost)}</b> · to'ldirish ${exit} edi</div>`
+      : `<div>🌴 CA ✓ kerakligicha olindi (~${esc(c.gotGal)} gal, kerak ~${esc(c.needNow)})</div>`;
+  }
+
   async function loadReport() {
     try {
       const j = await (await fetch(`/api/plan-report?days=${days}`)).json();
@@ -82,7 +92,7 @@
           <td class="num">${p.checked}</td>
           <td class="num">${p.cheaper}${p.missRate != null ? ` <span class="toll-dim">(${p.missRate}%)</span>` : ""}${p.cheaperBig ? `<div class="toll-dim">${p.cheaperBig} tasi $10+</div>` : ""}</td>
           <td class="num">${p.avgPpg == null ? "—" : "$" + p.avgPpg.toFixed(3)}</td>
-          <td class="num">${p.save ? `<b class="bad">$${p.save}</b>` : "—"}</td>
+          <td class="num">${p.save ? `<b class="bad">$${p.save}</b>` : "—"}${p.caOver ? `<div class="bad">🌴 CA ortiqcha: ${p.caOver} marta · $${Math.round(p.caLost)}</div>` : (p.caChecked ? `<div class="toll-dim">🌴 CA ✓ ${p.caChecked}</div>` : "")}</td>
           <td class="audit-why">${w ? `${esc(w.unit)} → #${esc(w.num)} $${w.ppg} · arzoni #${esc(w.better.num)} $${w.better.ppg} (${w.better.miles} mi) → $${Math.round(w.better.save)}` : ""}</td>
         </tr>`;
       }).join("") || `<tr><td colspan="7" class="toll-dim">Yozuv yo'q</td></tr>`;
@@ -100,7 +110,7 @@
             `${Math.round((p.better.diff || 0) * 100)}¢/gal arzon · ~$${Math.round(p.better.save)}${p.better.small ? " (bak to'la edi — tejov kichik)" : ""}`
           : (p.checked ? "✓ yo'lda 10¢+ arzonrog'i yo'q edi" : "<span class=\"toll-dim\">tekshirilmagan</span>")}${
           p.trip && p.trip.offRoute ? ` <span class="bad">· yo'ldan ${p.trip.hereOff} mi chetda</span>` : ""}${
-          p.basis === "heading" ? ` <span class="toll-dim">(taxmin)</span>` : ""}</td>
+          p.basis === "heading" ? ` <span class="toll-dim">(taxmin)</span>` : ""}${caNote(p.ca)}</td>
       </tr>`).join("") || `<tr><td colspan="8" class="toll-dim">Yozuv yo'q</td></tr>`;
     } catch (e) {
       $("#team-sum").textContent = "hisobot olinmadi: " + e.message;

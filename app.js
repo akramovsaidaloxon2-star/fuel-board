@@ -181,9 +181,14 @@ function render() {
       const zipHtml = a.zip
         ? `<span class="fs-zip-pill" title="Yuk boradigan ZIP — truck yoqilg'i olgach o'chadi">📮 ${esc(a.zip)}</span>`
         : (a.fueledAt ? `<span class="fs-zip-pill done" title="Yoqilg'i olindi">⛽ olindi</span>` : "");
+      // California: the gallons to take, so whoever is on the phone with the
+      // driver says "25", not "fill it up". Goes once the truck has fuelled.
+      const caHtml = a.ca && a.ca.exit && !a.fueledAt
+        ? `<span class="fs-zip-pill ca" title="CA qimmat — faqat shuncha oling, to'ldirish: #${esc(a.ca.exit.num)} ${esc(a.ca.exit.city || "")}, ${esc(a.ca.exit.st || "")} $${esc(a.ca.exit.ppg)} (~${esc(a.ca.exit.miles)} mi)">🌴 ${a.ca.recGal > 0 ? "~" + esc(a.ca.recGal) + " gal" : "olmasin"}</span>`
+        : "";
       fsCell = `<div class="fs-assigned ${near ? "near" : ""}">
           <span class="fs-pill brand-${a.brand}" title="${tip}">${label} #${esc(a.num)}</span>
-          <span class="fs-mi">${miles}</span>${priceHtml}${zipHtml}${addTp}
+          <span class="fs-mi">${miles}</span>${priceHtml}${zipHtml}${caHtml}${addTp}
           <button class="fs-clear" data-unit="${esc(r.unit)}" title="Tugatildi / tozalash">✕</button>
         </div>`;
     } else {

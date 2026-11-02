@@ -117,4 +117,46 @@ function cheaperOnRoute(route, stations, here, opts) {
 
 const ZIP_RE = /^\d{5}$/;
 
-module.exports = { buildRoute, locate, cheaperOnRoute, haversineMi, ZIP_RE };
+// --- Buying only what is needed at a dear stop ---
+// California diesel runs a dollar and a half over its neighbours. A truck
+// delivering there should buy just enough to make the delivery and get
+// back over the line, and fill up on the far side. "Enough" is two legs —
+// stop to delivery, delivery to the first cheap pump out of state — plus a
+// reserve, less what is already in the tank when it pulls in.
+
+// The pump the truck should be aiming for after the delivery: clearly
+// cheaper and outside the dear states. Distance and price are weighed
+// together — the dear fuel burned getting there, plus a tank-fill at the
+// exit's price — so a pump twenty miles further but ninety cents cheaper
+// wins, and one three hundred miles off for a few cents does not.
+function exitStation(stations, dest, o) {
+  const opts = { minGap: 0.40, maxMi: 400, roadFactor: 1.2, dearStates: ["CA"], mpg: 6.5, fillGal: 100, ...(o || {}) };
+  let best = null;
+  for (const s of stations || []) {
+    if (!s || typeof s.ppg !== "number" || s.lat == null) continue;
+    if (opts.dearStates.includes(String(s.st || "").toUpperCase())) continue;
+    if (s.ppg > opts.dearPpg - opts.minGap) continue;
+    const air = haversineMi(dest.lat, dest.lon, s.lat, s.lon);
+    if (air > opts.maxMi) continue;
+    const miles = air * opts.roadFactor;
+    const cost = (miles / opts.mpg) * opts.dearPpg + opts.fillGal * s.ppg;
+    if (!best || cost < best.cost) best = { ...s, air, cost };
+  }
+  if (!best) return null;
+  const { cost, ...rest } = best;
+  return { ...rest, miles: Math.round(best.air * opts.roadFactor) };
+}
+
+// How many gallons to buy at the dear stop, rounded up to five so the
+// driver gets a number they can read off the pump.
+function partialFill(o) {
+  const round = (x) => Math.round(x);
+  const arriveGal = Math.max(0, (o.fuelPct / 100) * o.capacity - o.toStopMi / o.mpg);
+  const reserveGal = ((o.reservePct == null ? 15 : o.reservePct) / 100) * o.capacity;
+  const needGal = (o.stopToDestMi + o.destToExitMi) / o.mpg + reserveGal;
+  const room = Math.max(0, o.capacity - arriveGal);
+  const rec = Math.min(room, Math.ceil(Math.max(0, needGal - arriveGal) / 5) * 5);
+  return { arriveGal: round(arriveGal), needGal: round(needGal), recGal: rec, fillGal: round(room), excessGal: round(room - rec) };
+}
+
+module.exports = { buildRoute, locate, cheaperOnRoute, haversineMi, exitStation, partialFill, ZIP_RE };
