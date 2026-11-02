@@ -634,6 +634,7 @@ const tgDiag = {
   // must never land in a file that syncs to the repo. Without this, "did the
   // USERS variable take?" can only be answered by someone trying to log in.
   users: Object.keys(USERS),
+  dispatchers: Object.keys(dispatchers),
   getMe: null,
   lastSend: null,
 };
