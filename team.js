@@ -92,12 +92,14 @@
         <td>${esc(p.by || "—")}</td>
         <td>${esc(p.unit)}</td>
         <td>${esc(p.driver || "")}</td>
-        <td>#${esc(p.num)} ${esc([p.city, p.st].filter(Boolean).join(", "))}</td>
+        <td>#${esc(p.num)} ${esc([p.city, p.st].filter(Boolean).join(", "))}${p.zip ? ` <span class="toll-dim">→ 📮${esc(p.zip)}</span>` : ""}</td>
         <td class="num">${p.ppg == null ? "—" : "$" + p.ppg}</td>
         <td class="num">${p.fuel == null ? "—" : p.fuel + "%"}</td>
         <td class="audit-why">${p.better
           ? `<span class="bad">arzoni bor edi:</span> #${esc(p.better.num)} $${p.better.ppg} · ${p.better.miles} mi · ~$${Math.round(p.better.save)}`
-          : (p.checked ? "✓ yaqinda arzoni yo'q edi" : "<span class=\"toll-dim\">tekshirilmagan</span>")}</td>
+          : (p.checked ? "✓ yo'lda arzoni yo'q edi" : "<span class=\"toll-dim\">tekshirilmagan</span>")}${
+          p.trip && p.trip.offRoute ? ` <span class="bad">· yo'ldan ${p.trip.hereOff} mi chetda</span>` : ""}${
+          p.basis === "heading" ? ` <span class="toll-dim">(taxmin)</span>` : ""}</td>
       </tr>`).join("") || `<tr><td colspan="8" class="toll-dim">Yozuv yo'q</td></tr>`;
     } catch (e) {
       $("#team-sum").textContent = "hisobot olinmadi: " + e.message;

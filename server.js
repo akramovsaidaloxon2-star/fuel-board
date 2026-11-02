@@ -396,7 +396,22 @@ function pruneFuelEvents() {
   return dropped;
 }
 
+// The ZIP belongs to one fill: the stop was planned to get the truck to that
+// delivery, and once the tank has gone up the plan has been carried out. The
+// stop stays where it is — only the destination goes, so the next stop is
+// planned against the next load rather than this one.
+function clearZipAfterFill(unit, t) {
+  const a = assignments[unit];
+  if (!a || !a.zip) return;
+  if (a.byAt && t < Date.parse(a.byAt)) return;   // a fill from before the plan is not this plan's fill
+  delete a.zip;
+  a.fueledAt = new Date(t).toISOString();
+  saveAssignments();
+  fsBoardCache = { data: null, at: 0 };
+}
+
 function recordFill(unit, t, from, to, loc) {
+  clearZipAfterFill(unit, t);
   const arr = (fuelEvents[unit] = fuelEvents[unit] || []);
   const last = arr[arr.length - 1];
   const lat = loc && loc.lat != null ? +loc.lat : null;
@@ -517,6 +532,10 @@ function migrateAssignments() {
       if (v.missedAt) next.missedAt = v.missedAt;
       if (v.by) next.by = v.by;
       if (v.byAt) next.byAt = v.byAt;
+      // Where the load is going, and when the truck fuelled for it. Dropping
+      // these on a restart would quietly turn every trip back into a guess.
+      if (v.zip) next.zip = v.zip;
+      if (v.fueledAt) next.fueledAt = v.fueledAt;
       assignments[u] = next;
     }
     else delete assignments[u];
@@ -2003,9 +2022,18 @@ async function handleRequest(req, res) {
     const brand = (body && body.brand) || "pilot";
     const dir = brandStations[brand];
     const num = normNum(body && body.station);
+    const zip = String((body && body.zip) || "").trim();
     if (!unit || !num || !dir) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "unit, brand va station kerak" }));
+      return;
+    }
+    // Where the load is going. Without it the board can only guess "ahead"
+    // from the truck's heading; with it, it can name the stations on the
+    // actual road — which is the whole point of judging a plan.
+    if (!routeFuel.ZIP_RE.test(zip)) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Yuk boradigan ZIP kodni kiriting (5 raqam)" }));
       return;
     }
     if (!dir[num]) {
@@ -2015,18 +2043,34 @@ async function handleRequest(req, res) {
     }
     // Who sent this truck where. Without it the board can show the plan and
     // never say whose plan it was, which is the whole point of separate logins.
-    assignments[unit] = { brand, num, by: req._user || "", byAt: new Date().toISOString() };
+    assignments[unit] = { brand, num, zip, by: req._user || "", byAt: new Date().toISOString() };
     saveAssignments();
     fsBoardCache = { data: null, at: 0 };
 
     // The one moment the choice can still be changed: say so now, on the
     // board and in Telegram, rather than in a report next week.
-    let advice = null, truck = null;
+    let advice = null, truck = null, trip = null;
     try {
       const data = await getFuelData();
       truck = (data.fleet || []).find((x) => x.unit === unit) || null;
-      if (truck) advice = cheaperAhead(unit, truck, brand, num);
+      if (truck) {
+        // The road to the delivery first; the heading guess only when the
+        // road could not be worked out.
+        ({ trip, advice } = await adviceForTrip(unit, truck, brand, num, zip));
+        if (!trip) advice = cheaperAhead(unit, truck, brand, num);
+      }
     } catch { /* advice is a bonus; the assignment itself stands */ }
+    // Sent out of the way to fuel is worth a word on its own, even when the
+    // stop it was sent to is the cheapest thing around.
+    if (trip && trip.offRoute && !advice && truck) {
+      const who = req._user ? ` · ${tgEsc(req._user)}` : "";
+      tgSend(
+        `↪️ <b>Fuel stop yo'ldan chetda</b>\n<b>Unit ${tgEsc(unit)}</b>${who}\n` +
+        `#${tgEsc(num)} — ${tgEsc([dir[num].city, dir[num].st].filter(Boolean).join(", "))} · ` +
+        `${trip.zip} ga boradigan yo'ldan <b>${trip.hereOff} mi</b> chetda`,
+        TG_OWNER_CHAT
+      ).catch(() => {});
+    }
     if (advice && truck) {
       const who = req._user ? ` · ${tgEsc(req._user)}` : "";
       const driver = truck.driver && truck.driver !== "Unassigned" ? ` (${tgEsc(truck.driver)})` : "";
@@ -2041,7 +2085,8 @@ async function handleRequest(req, res) {
           ? `\nYo'l ustida aniq: #${tgEsc(advice.onWay.num)} ${tgEsc([advice.onWay.city, advice.onWay.st].filter(Boolean).join(", "))} — ` +
             `<b>$${advice.onWay.ppg}</b>/gal · ${advice.onWay.miles} mi → ~$${advice.onWay.save}`
           : "") +
-        `\nHozir <b>${truck.fuel}%</b> · yetadigan masofa ~${advice.range} mi`,
+        `\nHozir <b>${truck.fuel}%</b> · yetadigan masofa ~${advice.range} mi` +
+        (trip ? `\n🛣 ${tgEsc(trip.zip)} ga boradigan yo'l bo'yicha (${trip.miles} mi)` : `\n🧭 yo'nalish taxmini bo'yicha (ZIP yo'li topilmadi)`),
         TG_OWNER_CHAT
       ).catch(() => {});
     }
@@ -2063,6 +2108,12 @@ async function handleRequest(req, res) {
       ppg: advice ? advice.assigned.ppg : price,
       miles: advice ? advice.assigned.miles : null,
       checked: !!truck,
+      zip,
+      // "road" when the comparison used the route to the ZIP, "heading" when
+      // it fell back to the guess — the report can tell a certain judgement
+      // from a rough one.
+      basis: trip ? "road" : (truck ? "heading" : null),
+      trip: trip ? { miles: trip.miles, offRoute: trip.offRoute, hereOff: trip.hereOff, dest: trip.dest } : null,
       better: advice ? {
         num: advice.better.num, ppg: advice.better.ppg, miles: advice.better.miles,
         side: advice.better.side, city: advice.better.city, st: advice.better.st,
@@ -2072,7 +2123,7 @@ async function handleRequest(req, res) {
     });
 
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, unit, brand, station: { num, ...dir[num] }, advice }));
+    res.end(JSON.stringify({ ok: true, unit, brand, zip, station: { num, ...dir[num] }, advice, trip }));
     return;
   }
   // Clear a unit's fuel stop (e.g. once it has fueled).
@@ -2746,6 +2797,8 @@ async function initDurable() {
 
     const el = await ghLoad("error_log.json");
     if (Array.isArray(el)) errorLog = [...errorLog, ...el].slice(0, 40);
+    const zg = await ghLoad("zip_geo.json");
+    if (zg && typeof zg === "object" && !Array.isArray(zg)) zipGeo = zg;
     const dp = await ghLoad("dispatchers.json");
     if (dp && typeof dp === "object" && !Array.isArray(dp)) dispatchers = dp;
     const fp = await ghLoad("fuel_plans.json");
@@ -3136,6 +3189,121 @@ function cheaperAhead(unit, truck, brand, num) {
   return {
     assigned: { num, ppg: Math.round(here.your * 1000) / 1000, miles: Math.round(hereMi), city: stn.city, st: stn.st },
     better: best, diff, gallons, save, onWay, range: Math.round(range), capacity, mpg,
+  };
+}
+
+// --- The same question, once the delivery ZIP is known ---
+const routeFuel = require("./route-fuel.js");
+
+// Where a ZIP is. Asked once per ZIP ever: a postal code does not move, and
+// the lookup service asks callers not to repeat themselves.
+const ZIP_STORE = path.join(__dirname, "zip_geo.json");
+let zipGeo = {};   // { "79101": { lat, lon, label } | { miss: true, at } }
+try { zipGeo = JSON.parse(fs.readFileSync(ZIP_STORE, "utf8")); } catch { zipGeo = {}; }
+let zipTimer = null;
+function saveZipGeo() {
+  clearTimeout(zipTimer);
+  zipTimer = setTimeout(() => {
+    fs.writeFile(ZIP_STORE, JSON.stringify(zipGeo), () => {});
+    ghSave("zip_geo.json", zipGeo);
+  }, 3000);
+}
+async function zipPoint(zip) {
+  if (!routeFuel.ZIP_RE.test(String(zip || ""))) return null;
+  const hit = zipGeo[zip];
+  if (hit && hit.lat != null) return hit;
+  if (hit && hit.miss && Date.now() - Date.parse(hit.at || 0) < 7 * 864e5) return null;
+  try {
+    const url = `${GEOCODE_URL}?format=jsonv2&limit=1&countrycodes=us&postalcode=${zip}`;
+    const r = await fetch(url, {
+      headers: { "User-Agent": "movex-fuel-board/1.0 (fleet dispatch board)", Accept: "application/json" },
+      signal: AbortSignal.timeout(12000),
+    });
+    const j = r.ok ? await r.json() : null;
+    const h = Array.isArray(j) ? j[0] : null;
+    if (h && h.lat != null && h.lon != null) {
+      zipGeo[zip] = { lat: +h.lat, lon: +h.lon, label: String(h.display_name || zip).split(",").slice(0, 2).join(",").trim() };
+    } else zipGeo[zip] = { miss: true, at: new Date().toISOString() };
+    saveZipGeo();
+  } catch { return null; }   // a timeout is not a verdict on the ZIP — ask again next time
+  return zipGeo[zip] && zipGeo[zip].lat != null ? zipGeo[zip] : null;
+}
+
+// The road from the truck to the delivery. Car routing, so it knows nothing
+// of bridge heights or weight limits — but the question here is only which
+// stations sit beside the interstate the truck will take, and on that the
+// two routers agree.
+async function tripRoute(lat1, lon1, lat2, lon2) {
+  try {
+    const url = `${OSRM_BASE}/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=full&geometries=geojson`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const g = j.routes && j.routes[0] && j.routes[0].geometry;
+    if (!g || !Array.isArray(g.coordinates) || g.coordinates.length < 2) return null;
+    return routeFuel.buildRoute(g.coordinates);
+  } catch { return null; }
+}
+
+// The tank, as cheaperAhead reads it: the truck's own size from its own
+// history, its own MPG when it reports a sane one, and a reserve held back.
+function tankRange(unit, truck) {
+  const capacity = audit.estimateCapacity(fuelTxns[unit] || [], fuelEvents[unit] || []) || truck.tankGal || 150;
+  const mpg = truck.mpg && truck.mpg > 2 && truck.mpg < 12 ? truck.mpg : FALLBACK_MPG;
+  const usablePct = Math.max((truck.fuel == null ? 0 : truck.fuel) - RESERVE_PCT, 0);
+  return { capacity, mpg, range: (usablePct / 100) * capacity * mpg };
+}
+
+// Returns { trip, advice }. trip is null when the road could not be worked
+// out (ZIP unknown, router down) — the caller then falls back to the heading
+// guess, so a bad ZIP costs accuracy and nothing else. advice has the same
+// shape cheaperAhead returns, so the alert and the record need no second form.
+async function adviceForTrip(unit, truck, brand, num, zip) {
+  if (brand !== "pilot") return { trip: null, advice: null };
+  const prices = (priceData && priceData.prices) || {};
+  const hereP = prices[num];
+  const stn = (brandStations.pilot || {})[num];
+  if (!hereP || typeof hereP.your !== "number" || !stn) return { trip: null, advice: null };
+  if (truck.lat == null || truck.lon == null || truck.fuel == null) return { trip: null, advice: null };
+  const dest = await zipPoint(zip);
+  if (!dest) return { trip: null, advice: null };
+  const route = await tripRoute(truck.lat, truck.lon, dest.lat, dest.lon);
+  if (!route) return { trip: null, advice: null };
+
+  const { capacity, mpg, range } = tankRange(unit, truck);
+  const stations = [];
+  for (const n of Object.keys(prices)) {
+    const sn = (brandStations.pilot || {})[n], pr = prices[n];
+    if (sn && pr && typeof pr.your === "number") stations.push({ num: n, lat: sn.lat, lon: sn.lon, ppg: pr.your, city: sn.city, st: sn.st });
+  }
+  const here = { num, lat: stn.lat, lon: stn.lon, ppg: hereP.your, city: stn.city, st: stn.st };
+  const r = routeFuel.cheaperOnRoute(route, stations, here, { range, corridorMi: 3, minPpgGap: SAVE_MIN_PPG });
+  if (!r) return { trip: null, advice: null };
+  const trip = {
+    zip, dest: dest.label || zip, miles: r.routeMiles,
+    hereAlong: r.here.along, hereOff: r.here.off, offRoute: r.offRoute, range: Math.round(range),
+  };
+
+  const best = (r.before && r.after) ? (r.before.ppg <= r.after.ppg ? r.before : r.after) : (r.before || r.after);
+  if (!best) return { trip, advice: null };
+  const gallons = fillGallonsAt(capacity, truck.fuel, mpg, best.along);
+  const diff = Math.round((hereP.your - best.ppg) * 1000) / 1000;
+  const save = Math.round(diff * gallons);
+  if (save < SAVE_MIN_USD) return { trip, advice: null };
+  let onWay = null;
+  if (r.before && best !== r.before) {
+    const g = fillGallonsAt(capacity, truck.fuel, mpg, r.before.along);
+    const d = Math.round((hereP.your - r.before.ppg) * 1000) / 1000;
+    const sv = Math.round(d * g);
+    if (sv >= SAVE_MIN_USD) onWay = { ...r.before, miles: r.before.along, diff: d, gallons: g, save: sv };
+  }
+  return {
+    trip,
+    advice: {
+      assigned: { num, ppg: Math.round(hereP.your * 1000) / 1000, miles: r.here.along, city: stn.city, st: stn.st },
+      better: { ...best, miles: best.along },
+      diff, gallons, save, onWay, range: Math.round(range), capacity, mpg, onRoute: true,
+    },
   };
 }
 

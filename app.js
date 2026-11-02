@@ -178,9 +178,12 @@ function render() {
       // The brand dropdown is gone once a stop is assigned, so offer the toll
       // point behind a small pin button instead.
       const addTp = `<button class="tp-add" data-tpadd="${esc(r.unit)}" title="Toll nuqtasi qo'shish">📍</button>`;
+      const zipHtml = a.zip
+        ? `<span class="fs-zip-pill" title="Yuk boradigan ZIP — truck yoqilg'i olgach o'chadi">📮 ${esc(a.zip)}</span>`
+        : (a.fueledAt ? `<span class="fs-zip-pill done" title="Yoqilg'i olindi">⛽ olindi</span>` : "");
       fsCell = `<div class="fs-assigned ${near ? "near" : ""}">
           <span class="fs-pill brand-${a.brand}" title="${tip}">${label} #${esc(a.num)}</span>
-          <span class="fs-mi">${miles}</span>${priceHtml}${addTp}
+          <span class="fs-mi">${miles}</span>${priceHtml}${zipHtml}${addTp}
           <button class="fs-clear" data-unit="${esc(r.unit)}" title="Tugatildi / tozalash">✕</button>
         </div>`;
     } else {
@@ -192,6 +195,7 @@ function render() {
             <option value="point">📍 Toll point</option>
           </select>
           <input class="fs-inp" data-unit="${esc(r.unit)}" inputmode="numeric" placeholder="#" autocomplete="off">
+          <input class="fs-zip" data-unit="${esc(r.unit)}" inputmode="numeric" maxlength="5" placeholder="ZIP" autocomplete="off" title="Yuk boradigan ZIP kod">
         </div>`;
     }
     fsCell += tpHtml;
@@ -244,19 +248,45 @@ function render() {
       const inp = form && form.querySelector(".fs-inp");
       if (!inp) return;
       const isPoint = sel.value === "point";
+      const zipBox = form.querySelector(".fs-zip");
+      if (zipBox) zipBox.style.display = isPoint ? "none" : "";
       inp.placeholder = isPoint ? "Joy nomi yoki link" : "#";
       inp.classList.toggle("fs-inp-wide", isPoint);
       if (isPoint) inp.removeAttribute("inputmode"); else inp.setAttribute("inputmode", "numeric");
       inp.focus();
     });
   });
+  const submitStop = (form, focusFrom) => {
+    const inp = form.querySelector(".fs-inp");
+    const zipBox = form.querySelector(".fs-zip");
+    const brand = form.querySelector(".fs-brand").value;
+    if (brand === "point") { assignTollPoint(inp.dataset.unit, inp.value, inp); return; }
+    if (!inp.value.trim()) { inp.focus(); return; }
+    const zip = (zipBox && zipBox.value || "").trim();
+    // The ZIP is what lets the board judge the stop against the real road,
+    // so the form will not go without one.
+    if (!/^\d{5}$/.test(zip)) {
+      if (zipBox) { zipBox.classList.add("fs-zip-need"); zipBox.focus(); }
+      return;
+    }
+    assignStop(inp.dataset.unit, brand, inp.value, inp, zip, zipBox);
+  };
   tbody.querySelectorAll(".fs-inp").forEach(inp => {
     inp.addEventListener("keydown", e => {
       if (e.key !== "Enter") return;
       const form = inp.closest(".fs-assign-form");
-      const brand = form ? form.querySelector(".fs-brand").value : "pilot";
-      if (brand === "point") assignTollPoint(inp.dataset.unit, inp.value, inp);
-      else assignStop(inp.dataset.unit, brand, inp.value, inp);
+      if (form) submitStop(form, inp);
+    });
+  });
+  tbody.querySelectorAll(".fs-zip").forEach(z => {
+    z.addEventListener("input", () => {
+      z.value = z.value.replace(/\D/g, "").slice(0, 5);
+      z.classList.remove("fs-zip-need");
+    });
+    z.addEventListener("keydown", e => {
+      if (e.key !== "Enter") return;
+      const form = z.closest(".fs-assign-form");
+      if (form) submitStop(form, z);
     });
   });
   tbody.querySelectorAll(".fs-clear").forEach(b => {
@@ -327,19 +357,21 @@ async function saveNoteModal() {
   } catch (e) { alert("Xato: " + e.message); }
 }
 
-async function assignStop(unit, brand, station, inp) {
+async function assignStop(unit, brand, station, inp, zip, zipBox) {
   station = normNum(station);
   if (!station) return;
   if (inp) inp.disabled = true;
+  if (zipBox) zipBox.disabled = true;
+  const unlock = () => { if (inp) inp.disabled = false; if (zipBox) zipBox.disabled = false; };
   try {
-    const r = await fetch("/api/fuel-stop/assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unit, brand, station }) });
+    const r = await fetch("/api/fuel-stop/assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ unit, brand, station, zip }) });
     const j = await r.json();
-    if (!j.ok) { alert(j.error || "Xato"); if (inp) { inp.disabled = false; inp.focus(); } return; }
+    if (!j.ok) { alert(j.error || "Xato"); unlock(); if (inp) inp.focus(); return; }
     const row = fleet.find(x => x.unit === unit);
-    if (row) row.assignedStop = { brand, num: station };
+    if (row) row.assignedStop = { brand, num: station, zip };
     render();
     loadFsBoard();
-  } catch (e) { alert("Xato: " + e.message); if (inp) inp.disabled = false; }
+  } catch (e) { alert("Xato: " + e.message); unlock(); }
 }
 
 async function clearStop(unit) {
