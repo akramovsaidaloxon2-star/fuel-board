@@ -2174,7 +2174,11 @@ async function handleRequest(req, res) {
   if (req.url.startsWith("/api/plan-report")) {
     const days = Math.min(Math.max(+new URL(req.url, "http://x").searchParams.get("days") || 30, 1), 365);
     const since = new Date(Date.now() - days * 864e5).toISOString();
-    const rows = fuelPlans.filter((p) => p.at >= since);
+    // Records written before the price fix carry the whole price row where
+    // the number belongs. Read the number out of it rather than let one old
+    // entry print "[object Object]" and turn an average into NaN.
+    const num = (v) => (typeof v === "number" ? v : (v && typeof v.your === "number" ? Math.round(v.your * 1000) / 1000 : null));
+    const rows = fuelPlans.filter((p) => p.at >= since).map((p) => ({ ...p, ppg: num(p.ppg) }));
     const by = {};
     for (const p of rows) {
       const k = p.by || "(login yo'q)";
