@@ -84,6 +84,24 @@ function setDispatcher(name, pass, by) {
   };
   saveDispatchers();
 }
+// The list is read at boot, so an account added to the durable store while
+// the board is already running would otherwise wait for the next restart —
+// and that can be days. A failed login asks the store once a minute before
+// giving up, which costs nothing when nobody is mistyping and makes a seeded
+// account work within the minute.
+let dispRefresh = 0;
+const DISP_RECHECK_MS = Math.max(+process.env.DISP_RECHECK_MS || 60000, 1000);
+async function refreshDispatchers() {
+  if (!GH_ON || Date.now() - dispRefresh < DISP_RECHECK_MS) return false;
+  dispRefresh = Date.now();
+  const d = await ghLoad("dispatchers.json").catch(() => null);
+  if (!d || typeof d !== "object" || Array.isArray(d)) return false;
+  const before = Object.keys(dispatchers).length;
+  dispatchers = d;
+  if (Object.keys(d).length !== before) console.log(`  Dispatcherlar:       ${Object.keys(d).join(", ") || "yo'q"} (durable repodan)`);
+  return true;
+}
+
 // Compared the slow way on purpose: a fast compare leaks, one character at a
 // time, how much of a password was right.
 function checkDispatcher(name, pass) {
@@ -1731,7 +1749,11 @@ async function handleRequest(req, res) {
   // Validate credentials -> set a signed HttpOnly session cookie.
   if (req.url === "/api/login" && req.method === "POST") {
     const body = await readBody(req);
-    const who = userFor((body && body.user || "").trim(), (body && body.pass) || "");
+    const name = (body && body.user || "").trim(), pass = (body && body.pass) || "";
+    let who = userFor(name, pass);
+    // Not a match? The account may have been added since this process
+    // started. Ask the durable store once, then decide.
+    if (!who && await refreshDispatchers()) who = userFor(name, pass);
     if (!who) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: "Login yoki parol noto'g'ri" }));
