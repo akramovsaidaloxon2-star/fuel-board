@@ -190,16 +190,35 @@ const GH_ON = !!(GH_TOKEN && GH_REPO);
 const GH_API = process.env.GH_API || "https://api.github.com";
 const ghSha = {};
 const ghHeaders = () => ({ Authorization: `Bearer ${GH_TOKEN}`, "User-Agent": "fuel-board", Accept: "application/vnd.github+json" });
+// Files this process failed to read. Nothing may be written over them: an
+// empty object pushed on top of a file that merely could not be fetched is
+// how three weeks of history disappears in one deploy.
+const ghUnread = new Set();
 async function ghLoad(file) {
   if (!GH_ON) return null;
   try {
     const r = await fetch(`${GH_API}/repos/${GH_REPO}/contents/${file}`, { headers: ghHeaders() });
-    if (r.status === 404) return undefined; // file not there yet
-    if (!r.ok) { console.error("ghLoad", file, r.status); return null; }
+    if (r.status === 404) { ghUnread.delete(file); return undefined; } // not there yet — an empty start is correct
+    if (!r.ok) { console.error("ghLoad", file, r.status); ghUnread.add(file); return null; }
     const j = await r.json();
     ghSha[file] = j.sha;
-    return JSON.parse(Buffer.from(j.content, "base64").toString("utf8"));
-  } catch (e) { console.error("ghLoad err", file, e.message); return null; }
+    // Over a megabyte the contents endpoint answers with the metadata and an
+    // empty body — which parsed as "the file is empty" and then got saved
+    // back as empty. The raw accept header returns the bytes themselves and
+    // is good to a hundred megabytes.
+    let text = j.content ? Buffer.from(j.content, "base64").toString("utf8") : "";
+    if (!text) {
+      const raw = await fetch(`${GH_API}/repos/${GH_REPO}/contents/${file}`, {
+        headers: { ...ghHeaders(), Accept: "application/vnd.github.raw" },
+      });
+      if (!raw.ok) { console.error("ghLoad raw", file, raw.status); ghUnread.add(file); return null; }
+      text = await raw.text();
+    }
+    if (!text.trim()) { ghUnread.add(file); return null; }   // empty is never a real state here
+    const parsed = JSON.parse(text);
+    ghUnread.delete(file);
+    return parsed;
+  } catch (e) { console.error("ghLoad err", file, e.message); ghUnread.add(file); return null; }
 }
 const ghTimers = {}, ghPending = {}, ghLastSave = {};
 // High-frequency, webhook-driven files push to GitHub at most once per 5 min
@@ -230,6 +249,13 @@ async function ghPut(file, obj) {
 }
 function ghSave(file, obj) {
   if (!GH_ON) return;
+  // Refuse to overwrite what this process could not read. The in-memory copy
+  // started empty and only holds what happened since boot, so writing it
+  // would replace the history rather than extend it.
+  if (ghUnread.has(file)) {
+    console.error(`\u2717 ghSave ${file}: o'qib bo'lmagan fayl ustiga yozilmaydi`);
+    return;
+  }
   ghPending[file] = obj;                       // always remember the latest object
   if (ghTimers[file]) return;                  // a flush is already scheduled
   const wait = Math.max((GH_MIN[file] || 4000) - (Date.now() - (ghLastSave[file] || 0)), 800);
@@ -2024,7 +2050,10 @@ async function handleRequest(req, res) {
     // same as a stop with no cheaper option, and a report that treats them
     // alike flatters whoever was on shift during an outage.
     const stn = dir[num];
-    const price = (priceData && priceData.prices && priceData.prices[num]) || null;
+    const row = (priceData && priceData.prices && priceData.prices[num]) || null;
+    // The contract price itself. The price sheet holds a row per station —
+    // storing the row made the report average objects and print one.
+    const price = row && typeof row.your === "number" ? Math.round(row.your * 1000) / 1000 : null;
     recordPlan({
       at: new Date().toISOString(),
       by: req._user || "", unit, brand, num,
@@ -2977,6 +3006,9 @@ async function runPassWatch() {
     });
     const cutoff = now - 120 * 864e5;
     while (arr.length && Date.parse(arr[0].at) < cutoff) arr.shift();
+    // A backstop on top of the age limit: a truck that lives at one exit can
+    // otherwise pile up sightings faster than four months of them expire.
+    if (arr.length > 2000) arr.splice(0, arr.length - 2000);
     changed = true;
   }
   if (changed) savePassed();
