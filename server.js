@@ -2713,6 +2713,37 @@ async function initDurable() {
     }
     const ss = await ghLoad("scale_seen.json");
     if (ss && typeof ss === "object" && !Array.isArray(ss)) scaleSeen = ss;
+    // --- One-off recovery ---
+    // Three weeks of sightings and tank readings were overwritten by a read
+    // that came back empty for any file over a megabyte. The lost copies are
+    // in this repo's own git history, so they are put back beside the live
+    // ones and merged here — merged, not restored, because the board has gone
+    // on recording since. Does nothing once the two files are removed.
+    const psR = await ghLoad("passed_stations_restore.json");
+    if (psR && typeof psR === "object" && !Array.isArray(psR)) {
+      let added = 0;
+      for (const u of Object.keys(psR)) {
+        const have = new Set((passedStations[u] || []).map((x) => x && x.at));
+        const merged = (passedStations[u] || []).slice();
+        for (const x of psR[u] || []) if (x && x.at && !have.has(x.at)) { merged.push(x); added++; }
+        merged.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+        passedStations[u] = merged;
+      }
+      if (added) { console.log(`  Tiklandi:            passed_stations +${added} yozuv`); savePassed(); }
+    }
+    const fsR = await ghLoad("fuel_series_restore.json");
+    if (fsR && typeof fsR === "object" && !Array.isArray(fsR)) {
+      let added = 0;
+      for (const u of Object.keys(fsR)) {
+        const have = new Set((fuelSeries[u] || []).map((x) => x && x[0]));
+        const merged = (fuelSeries[u] || []).slice();
+        for (const x of fsR[u] || []) if (Array.isArray(x) && !have.has(x[0])) { merged.push(x); added++; }
+        merged.sort((a, b) => a[0] - b[0]);
+        fuelSeries[u] = merged;
+      }
+      if (added) { console.log(`  Tiklandi:            fuel_series +${added} nuqta`); saveFuelSeries(); }
+    }
+
     const el = await ghLoad("error_log.json");
     if (Array.isArray(el)) errorLog = [...errorLog, ...el].slice(0, 40);
     const dp = await ghLoad("dispatchers.json");
