@@ -710,7 +710,36 @@ function tgNote(result) { tgDiag.lastSend = { at: new Date().toISOString(), ...r
 // the room with the person who chose it is a different message entirely.
 // Unset, the owner chat is the same chat, so nothing changes until it is
 // pointed somewhere else.
-const TG_OWNER_CHAT = process.env.TELEGRAM_OWNER_CHAT_ID || TG_CHAT;
+// Where the manager's private warnings go. The verdict on a dispatcher's
+// fuel stop must not land in the chat that dispatcher reads — and the
+// shared chat turned out to be the "Fuel & Toll" work account, not the
+// owner's own. So the owner's chat is set from the board and kept in the
+// durable repo; an env var still counts if someone set one. With neither,
+// the warnings are not sent anywhere: they stay in the Bollar tab, which
+// only the manager can open, rather than falling back to the shared chat.
+const OWNER_STORE = path.join(__dirname, "owner_chat.json");
+let ownerChatRec = null;   // { chatId, name, username, by, at }
+try { ownerChatRec = JSON.parse(fs.readFileSync(OWNER_STORE, "utf8")); } catch { ownerChatRec = null; }
+function ownerChat() {
+  if (ownerChatRec && ownerChatRec.chatId) return String(ownerChatRec.chatId);
+  const env = process.env.TELEGRAM_OWNER_CHAT_ID || "";
+  return env && env !== TG_CHAT ? env : "";
+}
+function saveOwnerChat() {
+  fs.writeFile(OWNER_STORE, JSON.stringify(ownerChatRec || {}), () => {});
+  ghSave("owner_chat.json", ownerChatRec || {});
+}
+// Whose chat an id is, asked of Telegram: a bare number cannot say whether
+// it is the owner's phone or the office account.
+async function tgDescribe(id) {
+  try {
+    const r = await fetch(`${TG_API}/bot${TG_TOKEN}/getChat?chat_id=${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(12000) });
+    const b = await r.json().catch(() => null);
+    if (!b || !b.ok) return { ok: false, error: (b && b.description) || `HTTP ${r.status}` };
+    const c = b.result || {};
+    return { ok: true, type: c.type, name: c.title || [c.first_name, c.last_name].filter(Boolean).join(" ") || "", username: c.username || "" };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
 
 async function tgSend(text, chatId) {
   if (!TG_ON) { tgNote({ ok: false, error: "TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID sozlanmagan" }); return false; }
@@ -763,24 +792,10 @@ async function tgBootCheck() {
       ? { ok: true, username: body.result && body.result.username }
       : { ok: false, status: r.status, error: (body && body.description) || `HTTP ${r.status}` };
   } catch (e) { tgDiag.getMe = { ok: false, error: e.message }; }
-  // Whose chat each one is. A number says nothing about whether the price
-  // warnings land with the owner or with the dispatchers being judged —
-  // and that is the one thing that must not be guessed.
-  const describe = async (id) => {
-    try {
-      const r = await fetch(`${TG_API}/bot${TG_TOKEN}/getChat?chat_id=${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(12000) });
-      const b = await r.json().catch(() => null);
-      if (!b || !b.ok) return { ok: false, error: (b && b.description) || `HTTP ${r.status}` };
-      const c = b.result || {};
-      return {
-        ok: true, type: c.type,
-        name: c.title || [c.first_name, c.last_name].filter(Boolean).join(" ") || "",
-        username: c.username || "",
-      };
-    } catch (e) { return { ok: false, error: e.message }; }
-  };
-  if (TG_CHAT) tgDiag.chatInfo = await describe(TG_CHAT);
-  if (TG_OWNER_CHAT && TG_OWNER_CHAT !== TG_CHAT) tgDiag.ownerInfo = await describe(TG_OWNER_CHAT);
+  if (TG_CHAT) tgDiag.chatInfo = await tgDescribe(TG_CHAT);
+  const oc = ownerChat();
+  tgDiag.ownerChat = oc ? "(alohida)" : "ulanmagan — shaxsiy xabarlar yuborilmaydi";
+  tgDiag.ownerInfo = oc ? await tgDescribe(oc) : null;
   tgDiagSave();
 }
 
@@ -2082,17 +2097,17 @@ async function handleRequest(req, res) {
     // stop it was sent to is the cheapest thing around.
     if (trip && trip.offRoute && !advice && truck) {
       const who = req._user ? ` · ${tgEsc(req._user)}` : "";
-      tgSend(
+      if (ownerChat()) tgSend(
         `↪️ <b>Fuel stop yo'ldan chetda</b>\n<b>Unit ${tgEsc(unit)}</b>${who}\n` +
         `#${tgEsc(num)} — ${tgEsc([dir[num].city, dir[num].st].filter(Boolean).join(", "))} · ` +
         `${trip.zip} ga boradigan yo'ldan <b>${trip.hereOff} mi</b> chetda`,
-        TG_OWNER_CHAT
+        ownerChat()
       ).catch(() => {});
     }
     if (advice && truck) {
       const who = req._user ? ` · ${tgEsc(req._user)}` : "";
       const driver = truck.driver && truck.driver !== "Unassigned" ? ` (${tgEsc(truck.driver)})` : "";
-      tgSend(
+      if (ownerChat()) tgSend(
         `💰 <b>Oldinda arzonroq bor</b>\n<b>Unit ${tgEsc(unit)}${driver}</b>${who}\n` +
         `Tayinlandi: #${tgEsc(advice.assigned.num)} — <b>$${advice.assigned.ppg}</b>/gal · ${advice.assigned.miles} mi\n` +
         `${advice.better.side === "before" ? "Yetib bormasdan" : "Oldinda"}: #${tgEsc(advice.better.num)} ` +
@@ -2105,7 +2120,7 @@ async function handleRequest(req, res) {
           : "") +
         `\nHozir <b>${truck.fuel}%</b> · yetadigan masofa ~${advice.range} mi` +
         (trip ? `\n🛣 ${tgEsc(trip.zip)} ga boradigan yo'l bo'yicha (${trip.miles} mi)` : `\n🧭 yo'nalish taxmini bo'yicha (ZIP yo'li topilmadi)`),
-        TG_OWNER_CHAT
+        ownerChat()
       ).catch(() => {});
     }
     // The decision, kept as it stood. "checked" says the comparison actually
@@ -2471,6 +2486,46 @@ async function handleRequest(req, res) {
   }
   // Finding a chat id is the fiddly part of the setup: write to the bot once,
   // then open this and copy the id it lists into TELEGRAM_CHAT_ID.
+  if (req.url === "/api/telegram/owner" && req.method === "GET") {
+    // The boot check names the shared chat a few seconds after start; asked
+    // before then, ask Telegram directly rather than show a bare number.
+    if (TG_ON && TG_CHAT && !(tgDiag.chatInfo && tgDiag.chatInfo.ok)) tgDiag.chatInfo = await tgDescribe(TG_CHAT);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      ok: true,
+      owner: ownerChatRec ? { name: ownerChatRec.name, username: ownerChatRec.username, at: ownerChatRec.at, by: ownerChatRec.by } : null,
+      ownerFromEnv: !ownerChatRec && !!ownerChat(),
+      shared: tgDiag.chatInfo || null,
+      sharedId: TG_CHAT,
+    }));
+    return;
+  }
+  if (req.url === "/api/telegram/owner" && req.method === "POST") {
+    const body = (await readBody(req)) || {};
+    const id = String(body.chatId || "").trim();
+    const fail = (code, error) => { res.writeHead(code, { "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error })); };
+    if (!/^-?\d{3,20}$/.test(id)) return fail(400, "chat raqami noto'g'ri");
+    if (id === String(TG_CHAT)) return fail(400, "bu umumiy chat — bolalar ham o'qiydi. Shaxsiy akkauntingizni tanlang");
+    const info = await tgDescribe(id);
+    if (!info.ok) return fail(400, `Telegram bu chatni tanimadi: ${info.error}`);
+    if (info.type !== "private") return fail(400, "bu guruh — shaxsiy chat bo'lishi kerak");
+    const sent = await tgSend("🔒 <b>Shaxsiy ogohlantirishlar ulandi</b>\nQimmat fuel stop va bolalarning natijalari endi faqat shu yerga keladi.", id);
+    if (!sent) return fail(400, "test xabari yetib bormadi — botni shu akkauntdan Start qilganingizni tekshiring");
+    ownerChatRec = { chatId: id, name: info.name, username: info.username, by: req._user || "", at: new Date().toISOString() };
+    saveOwnerChat();
+    tgDiag.ownerChat = "(alohida)"; tgDiag.ownerInfo = info; tgDiagSave();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, owner: { name: info.name, username: info.username } }));
+    return;
+  }
+  if (req.url === "/api/telegram/owner/clear" && req.method === "POST") {
+    ownerChatRec = null;
+    saveOwnerChat();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
   if (req.url === "/api/telegram/chats") {
     if (!TG_TOKEN) {
       res.writeHead(400, { "Content-Type": "application/json" });
@@ -2824,6 +2879,8 @@ async function initDurable() {
 
     const el = await ghLoad("error_log.json");
     if (Array.isArray(el)) errorLog = [...errorLog, ...el].slice(0, 40);
+    const oc = await ghLoad("owner_chat.json");
+    if (oc && typeof oc === "object" && !Array.isArray(oc)) ownerChatRec = oc.chatId ? oc : null;
     const zg = await ghLoad("zip_geo.json");
     if (zg && typeof zg === "object" && !Array.isArray(zg)) zipGeo = zg;
     const dp = await ghLoad("dispatchers.json");
@@ -3470,7 +3527,7 @@ server.listen(PORT, () => {
   console.log(`  Stop arrivals:       ${TG_ON ? `Telegram ✓ (${ARRIVE_MI} mi)` : "board only"}`);
   console.log(`  Yo'l sharoiti:       ${TG_ON ? `NWS har ${Math.round(WX_POLL_MS / 60000)} daq ✓` : "OFF"}`);
   console.log(`  Scale ogohlantirish: ${scalePoints.length ? `${scalePoints.length} ta scale · ${SCALE_MI} mi halqa ✓` : "OFF — Scale tabida joy qo'shing"}`);
-  console.log(`  Narx ogohlantirishi: ${TG_ON ? `chat ${TG_OWNER_CHAT}${TG_OWNER_CHAT === TG_CHAT ? " (umumiy bilan bir xil)" : " (alohida)"}` : "OFF"}`);
+  console.log(`  Narx ogohlantirishi: ${TG_ON ? (ownerChat() ? `shaxsiy chat ${ownerChat()}` : "shaxsiy chat ulanmagan — yuborilmaydi (Bollar tabidan ulang)") : "OFF"}`);
   console.log(`  Toll directions:     ${SHEET_ON ? `sheet har ${SHEET_POLL_MIN} daq · eslatma har ${REMIND_EVERY_MIN} daq ✓` : "OFF — set TOLL_SHEET_CSV"}\n`);
   initDurable()
     .catch((e) => console.error("initDurable", e.message))
