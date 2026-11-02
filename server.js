@@ -763,6 +763,24 @@ async function tgBootCheck() {
       ? { ok: true, username: body.result && body.result.username }
       : { ok: false, status: r.status, error: (body && body.description) || `HTTP ${r.status}` };
   } catch (e) { tgDiag.getMe = { ok: false, error: e.message }; }
+  // Whose chat each one is. A number says nothing about whether the price
+  // warnings land with the owner or with the dispatchers being judged —
+  // and that is the one thing that must not be guessed.
+  const describe = async (id) => {
+    try {
+      const r = await fetch(`${TG_API}/bot${TG_TOKEN}/getChat?chat_id=${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(12000) });
+      const b = await r.json().catch(() => null);
+      if (!b || !b.ok) return { ok: false, error: (b && b.description) || `HTTP ${r.status}` };
+      const c = b.result || {};
+      return {
+        ok: true, type: c.type,
+        name: c.title || [c.first_name, c.last_name].filter(Boolean).join(" ") || "",
+        username: c.username || "",
+      };
+    } catch (e) { return { ok: false, error: e.message }; }
+  };
+  if (TG_CHAT) tgDiag.chatInfo = await describe(TG_CHAT);
+  if (TG_OWNER_CHAT && TG_OWNER_CHAT !== TG_CHAT) tgDiag.ownerInfo = await describe(TG_OWNER_CHAT);
   tgDiagSave();
 }
 
@@ -2123,7 +2141,12 @@ async function handleRequest(req, res) {
     });
 
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, unit, brand, zip, station: { num, ...dir[num] }, advice, trip }));
+    // Whether a cheaper pump was on the road is the manager's judgement of
+    // the person who just chose this stop. It stays on the server: the page
+    // never showed it, and now the answer does not carry it either.
+    const mine = req._role === "manager";
+    res.end(JSON.stringify({ ok: true, unit, brand, zip, station: { num, ...dir[num] },
+      advice: mine ? advice : undefined, trip: mine ? trip : undefined }));
     return;
   }
   // Clear a unit's fuel stop (e.g. once it has fueled).
